@@ -248,7 +248,12 @@ export default function BookingForm() {
   };
 
   const handleConfirm = async () => {
+    if (!bookingId) {
+      setError("معرّف الحجز مفقود — أعيدي الحجز من البداية");
+      return;
+    }
     setSubmitting(true);
+    setError("");
     try {
       const res = await fetch("/api/payment/demo", {
         method: "POST",

@@ -22,7 +22,7 @@ async function handlePOST(request: NextRequest) {
       return NextResponse.json({ error: "معرّف الحجز أو الإهداء مطلوب" }, { status: 400 });
     }
 
-    const booking = confirmDemoPayment(bookingId);
+    const booking = await confirmDemoPayment(bookingId);
     if (!booking) {
       return NextResponse.json({ error: "الحجز غير موجود" }, { status: 404 });
     }

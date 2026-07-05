@@ -275,17 +275,18 @@ function store(): MemoryStore {
 export async function initStore(): Promise<void> {
   const g = globalRef();
   if (shouldUseBlob()) {
+    const warm = g.__softStore;
     const data = await readFromBlob();
     if (data) {
       g.__softStore = data;
       blobDiag("INIT_LOADED", { bookingsCount: data.bookings.length, source: "blob" });
+    } else if (warm && warm.bookings.length > 0) {
+      // blob فشل/فارغ لكن الذاكرة الدافئة فيها حجوزات (مثلاً بعد POST مباشرة)
+      g.__softStore = warm;
+      blobDiag("INIT_KEEP_WARM", { bookingsCount: warm.bookings.length });
     } else {
       g.__softStore = defaultStore();
-      blobDiag("INIT_NEW", {
-        bookingsCount: 0,
-        source: "defaultStore",
-        message: "لا يوجد ملف بعد — الذاكرة جاهزة وسيُنشأ الملف عند أول PUT",
-      });
+      blobDiag("INIT_NEW", { bookingsCount: 0, source: "defaultStore" });
     }
   } else if (!g.__softStore) {
     g.__softStore = loadFromFile() ?? defaultStore();
@@ -1162,9 +1163,50 @@ export function markAllNotificationsRead(filter: {
   return count;
 }
 
-export function confirmDemoPayment(id: string): BookingWithServices | null {
-  const b = store().bookings.find((x) => x.id === id);
-  if (!b) return null;
+export function getBookingById(id: string): BookingWithServices | null {
+  const key = id?.trim();
+  if (!key) return null;
+  return store().bookings.find((b) => b.id === key) ?? null;
+}
+
+/** إعادة تحميل من Blob والبحث عن حجز — لطلب التأكيد بعد الإنشاء مباشرة */
+async function reloadBookingFromBlob(id: string): Promise<BookingWithServices | null> {
+  const key = id.trim();
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (attempt > 0) {
+      await new Promise((r) => setTimeout(r, 200 * attempt));
+    }
+    const data = await readFromBlob();
+    if (data) {
+      globalRef().__softStore = data;
+      const found = store().bookings.find((b) => b.id === key);
+      if (found) return found;
+    }
+  }
+  return null;
+}
+
+export async function confirmDemoPayment(id: string): Promise<BookingWithServices | null> {
+  const key = id?.trim();
+  if (!key) return null;
+
+  let b = getBookingById(key);
+
+  if (!b && shouldUseBlob()) {
+    console.log("[confirmDemoPayment] إعادة تحميل من Blob | id:", key);
+    b = await reloadBookingFromBlob(key);
+  }
+
+  if (!b) {
+    console.error(
+      "[confirmDemoPayment] الحجز غير موجود | id:",
+      key,
+      "| حجوزات في الذاكرة:",
+      store().bookings.map((x) => x.id),
+    );
+    return null;
+  }
+
   if (b.requires_deposit) {
     b.payment_status = "deposit_pending";
     b.status = "awaiting_deposit";
