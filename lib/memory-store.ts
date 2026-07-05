@@ -3,7 +3,7 @@
  */
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
-import { BlobNotFoundError, get, head, list, put } from "@vercel/blob";
+import { BlobNotFoundError, get, list, put } from "@vercel/blob";
 import { join } from "path";
 import { randomUUID } from "crypto";
 import { asArray } from "./arrays";
@@ -203,41 +203,35 @@ function saveToFile(data: StoreData): void {
 
 async function readFromBlob(): Promise<StoreData | null> {
   const hasToken = Boolean(process.env.BLOB_READ_WRITE_TOKEN?.trim());
-  console.log("[blob-store] قراءة — التوكن موجود:", hasToken, "| المسار:", BLOB_PATH);
+  console.log("[blob-store] قراءة list() — التوكن موجود:", hasToken, "| المسار:", BLOB_PATH);
 
   try {
     const { blobs } = await list({ prefix: BLOB_PATH, limit: 10 });
     const found = blobs.find((b) => b.pathname === BLOB_PATH);
     if (!found) {
-      console.log("[blob-store] قراءة — الملف غير موجود بعد، نرجع حجوزات فارغة");
+      console.log("[blob-store] قراءة — الملف غير موجود، نرجع حجوزات فارغة []");
       return null;
     }
 
-    console.log("[blob-store] قراءة — الملف موجود عبر list، pathname:", found.pathname);
+    console.log("[blob-store] قراءة — وُجد عبر list():", found.pathname);
 
-    const result = await get(BLOB_PATH, { access: "private" });
+    // Private store: get() بالتوكن — لا fetch على الرابط
+    const result = await get(found.pathname, { access: "private" });
     if (!result || result.statusCode !== 200 || !result.stream) {
-      console.log("[blob-store] قراءة — get لم يُرجع بيانات (ملف فارغ أو غير موجود)");
+      console.log("[blob-store] قراءة — get() لم يُرجع stream");
       return null;
     }
 
     const text = await new Response(result.stream).text();
     const data = migrateStore(JSON.parse(text) as Partial<StoreData>);
-    console.log(
-      "[blob-store] قراءة — نجحت | bytes:",
-      text.length,
-      "| عدد الحجوزات:",
-      data.bookings.length,
-    );
-    blobDiag("GET_OK", { bytes: text.length, bookingsCount: data.bookings.length });
+    console.log("[blob-store] قراءة — نجحت | حجوزات:", data.bookings.length);
     return data;
   } catch (e) {
     if (e instanceof BlobNotFoundError) {
-      console.log("[blob-store] قراءة — BlobNotFoundError، نرجع حجوزات فارغة");
+      console.log("[blob-store] قراءة — غير موجود، حجوزات فارغة []");
       return null;
     }
     console.error("[blob-store] قراءة — خطأ:", e instanceof Error ? e.message : String(e));
-    blobDiag("GET_ERROR", { error: e instanceof Error ? e.message : String(e) });
     return null;
   }
 }
@@ -246,48 +240,27 @@ async function writeToBlob(data: StoreData): Promise<void> {
   const hasToken = Boolean(process.env.BLOB_READ_WRITE_TOKEN?.trim());
   const payload = JSON.stringify(data);
   console.log(
-    "[blob-store] كتابة — التوكن موجود:",
+    "[blob-store] كتابة put() — التوكن موجود:",
     hasToken,
     "| المسار:",
     BLOB_PATH,
-    "| عدد الحجوزات:",
+    "| حجوزات:",
     data.bookings.length,
   );
 
   const result = await put(BLOB_PATH, payload, {
-    access: "private",
     contentType: "application/json",
     addRandomSuffix: false,
     allowOverwrite: true,
+    access: "private",
   });
-
-  let verifiedSize: number | null = null;
-  try {
-    const meta = await head(BLOB_PATH);
-    verifiedSize = meta.size;
-  } catch (headErr) {
-    console.warn(
-      "[blob-store] كتابة — put نجح لكن head فشل:",
-      headErr instanceof Error ? headErr.message : String(headErr),
-    );
-  }
 
   console.log(
-    "[blob-store] كتابة — نجحت | pathname:",
+    "[blob-store] كتابة — نجحت put() | pathname:",
     result.pathname,
-    "| url:",
-    result.url,
-    "| حجم الملف:",
-    verifiedSize,
-    "| حجوزات مكتوبة:",
+    "| حجوزات:",
     data.bookings.length,
   );
-  blobDiag("PUT_OK", {
-    pathname: result.pathname,
-    url: result.url,
-    writtenBookings: data.bookings.length,
-    verifiedSize,
-  });
 }
 
 function store(): MemoryStore {
