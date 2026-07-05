@@ -3,7 +3,7 @@
  */
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
-import { get, head, put } from "@vercel/blob";
+import { BlobNotFoundError, get, head, list, put } from "@vercel/blob";
 import { join } from "path";
 import { randomUUID } from "crypto";
 import { asArray } from "./arrays";
@@ -137,9 +137,9 @@ function migrateStore(parsed: Partial<StoreData>): StoreData {
   };
 }
 
-// ─── التخزين: Vercel Blob (سحابة) + ملف محلي (للتطوير) ───
+// ─── التخزين: Vercel Blob خاص (Private) + ملف محلي (للتطوير) ───
 //
-// على Vercel: البيانات تُحفظ في Vercel Blob (نظام ملفات القرص للقراءة فقط).
+// على Vercel: البيانات تُحفظ في Vercel Blob الخاص — القراءة عبر التوكن فقط.
 // محلياً (بدون توكن): تُحفظ في data/soft-touch.json كما كانت.
 //
 // دورة الحياة لكل طلب API:
@@ -202,41 +202,63 @@ function saveToFile(data: StoreData): void {
 }
 
 async function readFromBlob(): Promise<StoreData | null> {
-  blobDiag("GET_START");
+  const hasToken = Boolean(process.env.BLOB_READ_WRITE_TOKEN?.trim());
+  console.log("[blob-store] قراءة — التوكن موجود:", hasToken, "| المسار:", BLOB_PATH);
+
   try {
-    const result = await get(BLOB_PATH, { access: "public" });
-    if (!result) {
-      blobDiag("GET_MISS", {
-        message: "ملف Blob غير موجود بعد — طبيعي عند أول حجز، سيُنشأ عند PUT",
-        bookingsCount: 0,
-      });
+    const { blobs } = await list({ prefix: BLOB_PATH, limit: 10 });
+    const found = blobs.find((b) => b.pathname === BLOB_PATH);
+    if (!found) {
+      console.log("[blob-store] قراءة — الملف غير موجود بعد، نرجع حجوزات فارغة");
       return null;
     }
+
+    console.log("[blob-store] قراءة — الملف موجود عبر list، pathname:", found.pathname);
+
+    const result = await get(BLOB_PATH, { access: "private" });
+    if (!result || result.statusCode !== 200 || !result.stream) {
+      console.log("[blob-store] قراءة — get لم يُرجع بيانات (ملف فارغ أو غير موجود)");
+      return null;
+    }
+
     const text = await new Response(result.stream).text();
     const data = migrateStore(JSON.parse(text) as Partial<StoreData>);
-    blobDiag("GET_OK", {
-      statusCode: result.statusCode,
-      bytes: text.length,
-      bookingsCount: data.bookings.length,
-      pathname: result.blob.pathname,
-    });
+    console.log(
+      "[blob-store] قراءة — نجحت | bytes:",
+      text.length,
+      "| عدد الحجوزات:",
+      data.bookings.length,
+    );
+    blobDiag("GET_OK", { bytes: text.length, bookingsCount: data.bookings.length });
     return data;
   } catch (e) {
+    if (e instanceof BlobNotFoundError) {
+      console.log("[blob-store] قراءة — BlobNotFoundError، نرجع حجوزات فارغة");
+      return null;
+    }
+    console.error("[blob-store] قراءة — خطأ:", e instanceof Error ? e.message : String(e));
     blobDiag("GET_ERROR", { error: e instanceof Error ? e.message : String(e) });
-    throw e;
+    return null;
   }
 }
 
 async function writeToBlob(data: StoreData): Promise<void> {
+  const hasToken = Boolean(process.env.BLOB_READ_WRITE_TOKEN?.trim());
   const payload = JSON.stringify(data);
-  blobDiag("PUT_START", { bookingsCount: data.bookings.length, payloadBytes: payload.length });
+  console.log(
+    "[blob-store] كتابة — التوكن موجود:",
+    hasToken,
+    "| المسار:",
+    BLOB_PATH,
+    "| عدد الحجوزات:",
+    data.bookings.length,
+  );
 
   const result = await put(BLOB_PATH, payload, {
-    access: "public",
+    access: "private",
     contentType: "application/json",
     addRandomSuffix: false,
     allowOverwrite: true,
-    cacheControlMaxAge: 0,
   });
 
   let verifiedSize: number | null = null;
@@ -244,18 +266,25 @@ async function writeToBlob(data: StoreData): Promise<void> {
     const meta = await head(BLOB_PATH);
     verifiedSize = meta.size;
   } catch (headErr) {
-    blobDiag("PUT_HEAD_WARN", {
-      message: "الكتابة نجحت لكن التحقق بـ head فشل",
-      error: headErr instanceof Error ? headErr.message : String(headErr),
-      url: result.url,
-      pathname: result.pathname,
-    });
+    console.warn(
+      "[blob-store] كتابة — put نجح لكن head فشل:",
+      headErr instanceof Error ? headErr.message : String(headErr),
+    );
   }
 
+  console.log(
+    "[blob-store] كتابة — نجحت | pathname:",
+    result.pathname,
+    "| url:",
+    result.url,
+    "| حجم الملف:",
+    verifiedSize,
+    "| حجوزات مكتوبة:",
+    data.bookings.length,
+  );
   blobDiag("PUT_OK", {
-    success: true,
-    url: result.url,
     pathname: result.pathname,
+    url: result.url,
     writtenBookings: data.bookings.length,
     verifiedSize,
   });
