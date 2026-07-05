@@ -66,6 +66,8 @@ async function handlePOST(request: NextRequest) {
       promo,
     });
 
+    console.log("[bookings/POST] CREATED id:", booking.id, "| flush will write store + booking file");
+
     return NextResponse.json({ booking, amountHalala });
   } catch (e) {
     const msg = e instanceof Error ? e.message : "خطأ في إنشاء الحجز";

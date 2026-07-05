@@ -3,7 +3,7 @@
  */
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
-import { BlobNotFoundError, get, list, put } from "@vercel/blob";
+import { BlobNotFoundError, get, put } from "@vercel/blob";
 import { join } from "path";
 import { randomUUID } from "crypto";
 import { asArray } from "./arrays";
@@ -147,15 +147,21 @@ function migrateStore(parsed: Partial<StoreData>): StoreData {
 //   ...المعالجة (store()/persist() متزامنة كما هي)...
 //   flushStore() → يحفظ التغييرات في السحابة إن وُجدت
 
-/** مفتاح موحّد للكتابة والقراءة في Vercel Blob */
-const BLOB_PATH = "soft-moment/store.json";
+/** مفتاح موحّد لملف المتجر الكامل — نفس المسار للكتابة والقراءة */
+const BLOB_STORE_PATH = "soft-moment/store.json";
+/** بادئة ملفات الحجوزات الفردية: soft-moment/bookings/{id}.json */
+const BLOB_BOOKINGS_PREFIX = "soft-moment/bookings/";
+
+function bookingBlobPath(id: string): string {
+  return `${BLOB_BOOKINGS_PREFIX}${id.trim()}.json`;
+}
 
 export function blobDiag(stage: string, extra: Record<string, unknown> = {}): void {
   const token = process.env.BLOB_READ_WRITE_TOKEN?.trim();
   console.log(
     `[blob-store] ${stage}`,
     JSON.stringify({
-      path: BLOB_PATH,
+      path: BLOB_STORE_PATH,
       vercel: Boolean(process.env.VERCEL),
       hasToken: Boolean(token),
       tokenLength: token?.length ?? 0,
@@ -202,36 +208,83 @@ function saveToFile(data: StoreData): void {
 }
 
 async function readFromBlob(): Promise<StoreData | null> {
-  const hasToken = Boolean(process.env.BLOB_READ_WRITE_TOKEN?.trim());
-  console.log("[blob-store] قراءة list() — التوكن موجود:", hasToken, "| المسار:", BLOB_PATH);
-
+  console.log("[blob-store] READ store START | path:", BLOB_STORE_PATH);
   try {
-    const { blobs } = await list({ prefix: BLOB_PATH, limit: 10 });
-    const found = blobs.find((b) => b.pathname === BLOB_PATH);
-    if (!found) {
-      console.log("[blob-store] قراءة — الملف غير موجود، نرجع حجوزات فارغة []");
-      return null;
-    }
-
-    console.log("[blob-store] قراءة — وُجد عبر list():", found.pathname);
-
-    // Private store: get() بالتوكن — لا fetch على الرابط
-    const result = await get(found.pathname, { access: "private" });
+    const result = await get(BLOB_STORE_PATH, { access: "private" });
     if (!result || result.statusCode !== 200 || !result.stream) {
-      console.log("[blob-store] قراءة — get() لم يُرجع stream");
+      console.log("[blob-store] READ store MISS | path:", BLOB_STORE_PATH);
       return null;
     }
-
     const text = await new Response(result.stream).text();
     const data = migrateStore(JSON.parse(text) as Partial<StoreData>);
-    console.log("[blob-store] قراءة — نجحت | حجوزات:", data.bookings.length);
+    console.log(
+      "[blob-store] READ store OK | path:",
+      BLOB_STORE_PATH,
+      "| bookings:",
+      data.bookings.length,
+      "| ids:",
+      data.bookings.map((b) => b.id),
+    );
     return data;
   } catch (e) {
     if (e instanceof BlobNotFoundError) {
-      console.log("[blob-store] قراءة — غير موجود، حجوزات فارغة []");
+      console.log("[blob-store] READ store NOT_FOUND | path:", BLOB_STORE_PATH);
       return null;
     }
-    console.error("[blob-store] قراءة — خطأ:", e instanceof Error ? e.message : String(e));
+    console.error("[blob-store] READ store ERROR | path:", BLOB_STORE_PATH, e);
+    return null;
+  }
+}
+
+async function readFromBlobWithRetry(maxAttempts = 5): Promise<StoreData | null> {
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    if (attempt > 0) {
+      console.log("[blob-store] READ store RETRY", attempt);
+      await new Promise((r) => setTimeout(r, 150 * attempt));
+    }
+    const data = await readFromBlob();
+    if (data) return data;
+  }
+  return null;
+}
+
+async function writeBookingBlob(booking: BookingWithServices): Promise<void> {
+  const path = bookingBlobPath(booking.id);
+  console.log("[blob-store] WRITE booking START | id:", booking.id, "| path:", path);
+  const result = await put(path, JSON.stringify(booking), {
+    contentType: "application/json",
+    addRandomSuffix: false,
+    allowOverwrite: true,
+    access: "private",
+  });
+  console.log(
+    "[blob-store] WRITE booking OK | id:",
+    booking.id,
+    "| path:",
+    path,
+    "| pathname:",
+    result.pathname,
+  );
+}
+
+async function readBookingFromBlob(id: string): Promise<BookingWithServices | null> {
+  const path = bookingBlobPath(id);
+  console.log("[blob-store] READ booking START | id:", id, "| path:", path);
+  try {
+    const result = await get(path, { access: "private" });
+    if (!result || result.statusCode !== 200 || !result.stream) {
+      console.log("[blob-store] READ booking MISS | id:", id, "| path:", path);
+      return null;
+    }
+    const booking = JSON.parse(await new Response(result.stream).text()) as BookingWithServices;
+    console.log("[blob-store] READ booking OK | id:", id, "| path:", path);
+    return booking;
+  } catch (e) {
+    if (e instanceof BlobNotFoundError) {
+      console.log("[blob-store] READ booking NOT_FOUND | id:", id, "| path:", path);
+      return null;
+    }
+    console.error("[blob-store] READ booking ERROR | id:", id, e);
     return null;
   }
 }
@@ -239,16 +292,19 @@ async function readFromBlob(): Promise<StoreData | null> {
 async function writeToBlob(data: StoreData): Promise<void> {
   const hasToken = Boolean(process.env.BLOB_READ_WRITE_TOKEN?.trim());
   const payload = JSON.stringify(data);
+  const ids = data.bookings.map((b) => b.id);
   console.log(
-    "[blob-store] كتابة put() — التوكن موجود:",
+    "[blob-store] WRITE store START | path:",
+    BLOB_STORE_PATH,
+    "| token:",
     hasToken,
-    "| المسار:",
-    BLOB_PATH,
-    "| حجوزات:",
+    "| bookings:",
     data.bookings.length,
+    "| ids:",
+    ids,
   );
 
-  const result = await put(BLOB_PATH, payload, {
+  const result = await put(BLOB_STORE_PATH, payload, {
     contentType: "application/json",
     addRandomSuffix: false,
     allowOverwrite: true,
@@ -256,11 +312,17 @@ async function writeToBlob(data: StoreData): Promise<void> {
   });
 
   console.log(
-    "[blob-store] كتابة — نجحت put() | pathname:",
+    "[blob-store] WRITE store OK | path:",
+    BLOB_STORE_PATH,
+    "| pathname:",
     result.pathname,
-    "| حجوزات:",
+    "| bookings:",
     data.bookings.length,
   );
+
+  for (const booking of data.bookings) {
+    await writeBookingBlob(booking);
+  }
 }
 
 function store(): MemoryStore {
@@ -316,17 +378,43 @@ export async function flushStore(): Promise<void> {
   }
 
   const bookingsToWrite = store().bookings.length;
-  blobDiag("FLUSH_START", { dirty: true, bookingsToWrite });
+  const writtenIds = store().bookings.map((b) => b.id);
+  blobDiag("FLUSH_START", { dirty: true, bookingsToWrite, writtenIds, storePath: BLOB_STORE_PATH });
 
   try {
     await writeToBlob(store());
     dirty = false;
 
-    const readBack = await readFromBlob();
+    const readBack = await readFromBlobWithRetry(5);
+    const readIds = readBack?.bookings.map((b) => b.id) ?? [];
+    const persisted = (readBack?.bookings.length ?? 0) >= bookingsToWrite;
+
+    console.log("[blob-store] FLUSH_VERIFY store | wrote:", bookingsToWrite, "| read:", readBack?.bookings.length ?? 0);
+    console.log("[blob-store] FLUSH_VERIFY ids | wrote:", writtenIds, "| read:", readIds);
+
+    if (!persisted && writtenIds.length > 0) {
+      const lastId = writtenIds[writtenIds.length - 1];
+      const viaBookingFile = lastId ? await readBookingFromBlob(lastId) : null;
+      console.log(
+        "[blob-store] FLUSH_VERIFY booking-file fallback | id:",
+        lastId,
+        "| found:",
+        Boolean(viaBookingFile),
+        "| path:",
+        lastId ? bookingBlobPath(lastId) : null,
+      );
+      if (!viaBookingFile) {
+        throw new Error(
+          `[blob-store] FLUSH_VERIFY failed: store read ${readBack?.bookings.length ?? 0}/${bookingsToWrite}, booking file missing for ${lastId}`,
+        );
+      }
+    }
+
     blobDiag("FLUSH_VERIFY", {
       writtenBookings: bookingsToWrite,
       readBackBookings: readBack?.bookings.length ?? null,
-      persisted: readBack?.bookings.length === bookingsToWrite,
+      persisted,
+      storePath: BLOB_STORE_PATH,
     });
   } catch (e) {
     blobDiag("FLUSH_ERROR", { error: e instanceof Error ? e.message : String(e) });
@@ -858,6 +946,7 @@ export function createBooking(input: {
     emitBookingNotifications("deposit_payment", booking);
   }
   persist();
+  console.log("[createBooking] SAVED id:", booking.id, "| blob booking path:", bookingBlobPath(booking.id));
   return { booking, amountHalala: Math.round(finalPrice * 100) };
 }
 
@@ -1169,43 +1258,82 @@ export function getBookingById(id: string): BookingWithServices | null {
   return store().bookings.find((b) => b.id === key) ?? null;
 }
 
-/** إعادة تحميل من Blob والبحث عن حجز — لطلب التأكيد بعد الإنشاء مباشرة */
+/** إعادة تحميل من Blob والبحث عن حجز — ملف المتجر الكامل */
 async function reloadBookingFromBlob(id: string): Promise<BookingWithServices | null> {
   const key = id.trim();
-  for (let attempt = 0; attempt < 3; attempt++) {
+  console.log("[reloadBookingFromBlob] START | id:", key, "| store path:", BLOB_STORE_PATH);
+  for (let attempt = 0; attempt < 5; attempt++) {
     if (attempt > 0) {
-      await new Promise((r) => setTimeout(r, 200 * attempt));
+      await new Promise((r) => setTimeout(r, 150 * attempt));
     }
     const data = await readFromBlob();
     if (data) {
       globalRef().__softStore = data;
       const found = store().bookings.find((b) => b.id === key);
-      if (found) return found;
+      if (found) {
+        console.log("[reloadBookingFromBlob] FOUND in store | id:", key, "| attempt:", attempt);
+        return found;
+      }
     }
   }
+  console.log("[reloadBookingFromBlob] NOT in store | id:", key);
   return null;
+}
+
+function mergeBookingIntoStore(booking: BookingWithServices): BookingWithServices {
+  const existing = store().bookings.find((b) => b.id === booking.id);
+  if (existing) return existing;
+  store().bookings.push(booking);
+  persist();
+  console.log("[mergeBookingIntoStore] merged id:", booking.id);
+  return booking;
 }
 
 export async function confirmDemoPayment(id: string): Promise<BookingWithServices | null> {
   const key = id?.trim();
-  if (!key) return null;
+  console.log("[confirmDemoPayment] START | id:", key);
+
+  if (!key) {
+    console.error("[confirmDemoPayment] empty id");
+    return null;
+  }
 
   let b = getBookingById(key);
+  console.log("[confirmDemoPayment] memory:", b ? "FOUND" : "NOT FOUND", "| ids in memory:", store().bookings.map((x) => x.id));
 
   if (!b && shouldUseBlob()) {
-    console.log("[confirmDemoPayment] إعادة تحميل من Blob | id:", key);
+    b = await readBookingFromBlob(key);
+    console.log(
+      "[confirmDemoPayment] booking blob file:",
+      b ? "FOUND" : "NOT FOUND",
+      "| path:",
+      bookingBlobPath(key),
+    );
+    if (b) {
+      b = mergeBookingIntoStore(b);
+    }
+  }
+
+  if (!b && shouldUseBlob()) {
+    console.log("[confirmDemoPayment] fallback reload store | path:", BLOB_STORE_PATH);
     b = await reloadBookingFromBlob(key);
   }
 
   if (!b) {
     console.error(
-      "[confirmDemoPayment] الحجز غير موجود | id:",
+      "[confirmDemoPayment] NOT FOUND | id:",
       key,
-      "| حجوزات في الذاكرة:",
+      "| store path:",
+      BLOB_STORE_PATH,
+      "| booking path:",
+      bookingBlobPath(key),
+      "| memory ids:",
       store().bookings.map((x) => x.id),
     );
     return null;
   }
+
+  console.log("[confirmDemoPayment] CONFIRMING id:", b.id, "| status before:", b.status);
 
   if (b.requires_deposit) {
     b.payment_status = "deposit_pending";
@@ -1218,6 +1346,7 @@ export async function confirmDemoPayment(id: string): Promise<BookingWithService
   }
   b.moyasar_payment_id = "demo-local";
   persist();
+  console.log("[confirmDemoPayment] DONE id:", b.id, "| status after:", b.status);
   return b;
 }
 

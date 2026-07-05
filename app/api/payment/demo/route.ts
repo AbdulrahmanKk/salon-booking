@@ -3,12 +3,14 @@ import { confirmDemoPayment, confirmGiftPayment } from "@/lib/memory-store";
 import { withStore } from "@/lib/with-store";
 
 export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
 export const POST = withStore(handlePOST);
 
 /** دفع تجريبي — بدون Moyasar */
 async function handlePOST(request: NextRequest) {
   try {
     const { bookingId, giftId } = await request.json();
+    console.log("[payment/demo] REQUEST | bookingId:", bookingId, "| giftId:", giftId);
 
     if (giftId) {
       const gift = confirmGiftPayment(giftId);
@@ -24,8 +26,11 @@ async function handlePOST(request: NextRequest) {
 
     const booking = await confirmDemoPayment(bookingId);
     if (!booking) {
+      console.error("[payment/demo] NOT FOUND | bookingId:", bookingId);
       return NextResponse.json({ error: "الحجز غير موجود" }, { status: 404 });
     }
+
+    console.log("[payment/demo] OK | bookingId:", booking.id, "| status:", booking.status);
 
     return NextResponse.json({ paid: true, booking });
   } catch (e) {
