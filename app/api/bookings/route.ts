@@ -5,6 +5,7 @@ import { withStore } from "@/lib/with-store";
 import type { BookingWithServices, CartItem, Region, ServiceSelection } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
 export const POST = withStore(handlePOST);
 export const GET = withStore(handleGET);
 

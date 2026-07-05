@@ -3,7 +3,7 @@
  */
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
-import { BlobNotFoundError, get, put } from "@vercel/blob";
+import { get, head, put } from "@vercel/blob";
 import { join } from "path";
 import { randomUUID } from "crypto";
 import { asArray } from "./arrays";
@@ -150,8 +150,26 @@ function migrateStore(parsed: Partial<StoreData>): StoreData {
 /** مفتاح موحّد للكتابة والقراءة في Vercel Blob */
 const BLOB_PATH = "soft-moment/store.json";
 
+export function blobDiag(stage: string, extra: Record<string, unknown> = {}): void {
+  const token = process.env.BLOB_READ_WRITE_TOKEN?.trim();
+  console.log(
+    `[blob-store] ${stage}`,
+    JSON.stringify({
+      path: BLOB_PATH,
+      vercel: Boolean(process.env.VERCEL),
+      hasToken: Boolean(token),
+      tokenLength: token?.length ?? 0,
+      hasStoreId: Boolean(process.env.BLOB_STORE_ID?.trim()),
+      ...extra,
+    }),
+  );
+}
+
+/** Blob على Vercel: توكن الكتابة/القراءة أو OIDC + BLOB_STORE_ID */
 function shouldUseBlob(): boolean {
-  return Boolean(process.env.BLOB_READ_WRITE_TOKEN?.trim());
+  if (process.env.BLOB_READ_WRITE_TOKEN?.trim()) return true;
+  if (process.env.VERCEL && process.env.BLOB_STORE_ID?.trim()) return true;
+  return false;
 }
 
 interface GlobalStore {
@@ -184,29 +202,62 @@ function saveToFile(data: StoreData): void {
 }
 
 async function readFromBlob(): Promise<StoreData | null> {
+  blobDiag("GET_START");
   try {
-    const result = await get(BLOB_PATH, {
-      access: "public",
-      token: process.env.BLOB_READ_WRITE_TOKEN,
-    });
-    if (!result) return null;
+    const result = await get(BLOB_PATH, { access: "public" });
+    if (!result) {
+      blobDiag("GET_MISS", {
+        message: "ملف Blob غير موجود بعد — طبيعي عند أول حجز، سيُنشأ عند PUT",
+        bookingsCount: 0,
+      });
+      return null;
+    }
     const text = await new Response(result.stream).text();
-    return migrateStore(JSON.parse(text) as Partial<StoreData>);
+    const data = migrateStore(JSON.parse(text) as Partial<StoreData>);
+    blobDiag("GET_OK", {
+      statusCode: result.statusCode,
+      bytes: text.length,
+      bookingsCount: data.bookings.length,
+      pathname: result.blob.pathname,
+    });
+    return data;
   } catch (e) {
-    if (e instanceof BlobNotFoundError) return null;
-    console.error("تعذّر قراءة التخزين السحابي:", e);
+    blobDiag("GET_ERROR", { error: e instanceof Error ? e.message : String(e) });
     throw e;
   }
 }
 
 async function writeToBlob(data: StoreData): Promise<void> {
-  await put(BLOB_PATH, JSON.stringify(data), {
+  const payload = JSON.stringify(data);
+  blobDiag("PUT_START", { bookingsCount: data.bookings.length, payloadBytes: payload.length });
+
+  const result = await put(BLOB_PATH, payload, {
     access: "public",
     contentType: "application/json",
     addRandomSuffix: false,
     allowOverwrite: true,
     cacheControlMaxAge: 0,
-    token: process.env.BLOB_READ_WRITE_TOKEN,
+  });
+
+  let verifiedSize: number | null = null;
+  try {
+    const meta = await head(BLOB_PATH);
+    verifiedSize = meta.size;
+  } catch (headErr) {
+    blobDiag("PUT_HEAD_WARN", {
+      message: "الكتابة نجحت لكن التحقق بـ head فشل",
+      error: headErr instanceof Error ? headErr.message : String(headErr),
+      url: result.url,
+      pathname: result.pathname,
+    });
+  }
+
+  blobDiag("PUT_OK", {
+    success: true,
+    url: result.url,
+    pathname: result.pathname,
+    writtenBookings: data.bookings.length,
+    verifiedSize,
   });
 }
 
@@ -223,27 +274,62 @@ export async function initStore(): Promise<void> {
   const g = globalRef();
   if (shouldUseBlob()) {
     const data = await readFromBlob();
-    g.__softStore = data ?? defaultStore();
+    if (data) {
+      g.__softStore = data;
+      blobDiag("INIT_LOADED", { bookingsCount: data.bookings.length, source: "blob" });
+    } else {
+      g.__softStore = defaultStore();
+      blobDiag("INIT_NEW", {
+        bookingsCount: 0,
+        source: "defaultStore",
+        message: "لا يوجد ملف بعد — الذاكرة جاهزة وسيُنشأ الملف عند أول PUT",
+      });
+    }
   } else if (!g.__softStore) {
     g.__softStore = loadFromFile() ?? defaultStore();
+    blobDiag("INIT_LOCAL", {
+      bookingsCount: g.__softStore.bookings.length,
+      source: existsSync(DATA_FILE) ? "file" : "defaultStore",
+    });
   }
   runMaintenance();
 }
 
 /** يُستدعى في نهاية كل مسار API — يحفظ التغييرات في السحابة إن وُجدت */
 export async function flushStore(): Promise<void> {
-  if (!dirty) return;
-  if (shouldUseBlob()) {
-    try {
-      await writeToBlob(store());
-      dirty = false;
-    } catch (e) {
-      console.error("تعذّر حفظ التخزين السحابي:", e);
-      throw e;
-    }
+  if (!dirty) {
+    blobDiag("FLUSH_SKIP", { reason: "not_dirty" });
     return;
   }
-  dirty = false;
+  if (!shouldUseBlob()) {
+    dirty = false;
+    if (process.env.VERCEL) {
+      console.error(
+        "[blob-store] FLUSH_BLOCKED: لا يوجد BLOB_READ_WRITE_TOKEN ولا BLOB_STORE_ID على Vercel — لن تُحفظ الحجوزات",
+      );
+    }
+    blobDiag("FLUSH_SKIP", { reason: "blob_disabled_on_vercel", vercel: Boolean(process.env.VERCEL) });
+    return;
+  }
+
+  const bookingsToWrite = store().bookings.length;
+  blobDiag("FLUSH_START", { dirty: true, bookingsToWrite });
+
+  try {
+    await writeToBlob(store());
+    dirty = false;
+
+    const readBack = await readFromBlob();
+    blobDiag("FLUSH_VERIFY", {
+      writtenBookings: bookingsToWrite,
+      readBackBookings: readBack?.bookings.length ?? null,
+      persisted: readBack?.bookings.length === bookingsToWrite,
+    });
+  } catch (e) {
+    blobDiag("FLUSH_ERROR", { error: e instanceof Error ? e.message : String(e) });
+    console.error("تعذّر حفظ التخزين السحابي:", e);
+    throw e;
+  }
 }
 
 function runMaintenance(): void {
@@ -335,11 +421,12 @@ function ensureReminderNotifications(): void {
 
 function persist(): void {
   dirty = true;
+  blobDiag("PERSIST", { dirty: true, bookingsCount: store().bookings.length, useBlob: shouldUseBlob() });
   if (!shouldUseBlob()) {
     saveToFile(store());
     if (process.env.VERCEL) {
       console.error(
-        "BLOB_READ_WRITE_TOKEN غير مضبوط على Vercel — الحجوزات تُحفظ في الذاكرة فقط ولن تبقى بعد التحديث",
+        "[blob-store] PERSIST_WARNING: على Vercel بدون Blob — الحجوزات في الذاكرة فقط",
       );
     }
   }

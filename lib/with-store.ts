@@ -1,4 +1,4 @@
-import { flushStore, initStore } from "./memory-store";
+import { blobDiag, flushStore, initStore } from "./memory-store";
 
 type RouteHandler = (...args: never[]) => Promise<Response> | Response;
 
@@ -8,11 +8,13 @@ type RouteHandler = (...args: never[]) => Promise<Response> | Response;
  */
 export function withStore<T extends RouteHandler>(handler: T): T {
   return (async (...args: Parameters<T>) => {
+    blobDiag("REQUEST_START", { handler: handler.name || "anonymous" });
     await initStore();
     try {
       return await handler(...args);
     } finally {
       await flushStore();
+      blobDiag("REQUEST_END", { handler: handler.name || "anonymous" });
     }
   }) as unknown as T;
 }
