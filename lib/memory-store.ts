@@ -3,7 +3,7 @@
  */
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
-import { list, put } from "@vercel/blob";
+import { BlobNotFoundError, get, put } from "@vercel/blob";
 import { join } from "path";
 import { randomUUID } from "crypto";
 import { asArray } from "./arrays";
@@ -147,12 +147,15 @@ function migrateStore(parsed: Partial<StoreData>): StoreData {
 //   ...المعالجة (store()/persist() متزامنة كما هي)...
 //   flushStore() → يحفظ التغييرات في السحابة إن وُجدت
 
+/** مفتاح موحّد للكتابة والقراءة في Vercel Blob */
 const BLOB_PATH = "soft-moment/store.json";
-const useBlob = Boolean(process.env.BLOB_READ_WRITE_TOKEN);
+
+function shouldUseBlob(): boolean {
+  return Boolean(process.env.BLOB_READ_WRITE_TOKEN?.trim());
+}
 
 interface GlobalStore {
   __softStore?: MemoryStore;
-  __softStoreBlobUrl?: string | null;
 }
 
 function globalRef(): typeof globalThis & GlobalStore {
@@ -182,48 +185,45 @@ function saveToFile(data: StoreData): void {
 
 async function readFromBlob(): Promise<StoreData | null> {
   try {
-    const g = globalRef();
-    let url = g.__softStoreBlobUrl ?? null;
-    if (!url) {
-      const { blobs } = await list({ prefix: BLOB_PATH, limit: 1 });
-      url = blobs[0]?.url ?? null;
-      g.__softStoreBlobUrl = url;
-    }
-    if (!url) return null;
-    const res = await fetch(`${url}?t=${Date.now()}`, { cache: "no-store" });
-    if (!res.ok) return null;
-    return migrateStore((await res.json()) as Partial<StoreData>);
+    const result = await get(BLOB_PATH, {
+      access: "public",
+      token: process.env.BLOB_READ_WRITE_TOKEN,
+    });
+    if (!result) return null;
+    const text = await new Response(result.stream).text();
+    return migrateStore(JSON.parse(text) as Partial<StoreData>);
   } catch (e) {
-    console.warn("تعذّر قراءة التخزين السحابي:", e);
-    return null;
+    if (e instanceof BlobNotFoundError) return null;
+    console.error("تعذّر قراءة التخزين السحابي:", e);
+    throw e;
   }
 }
 
 async function writeToBlob(data: StoreData): Promise<void> {
-  const { url } = await put(BLOB_PATH, JSON.stringify(data), {
+  await put(BLOB_PATH, JSON.stringify(data), {
     access: "public",
     contentType: "application/json",
     addRandomSuffix: false,
     allowOverwrite: true,
     cacheControlMaxAge: 0,
+    token: process.env.BLOB_READ_WRITE_TOKEN,
   });
-  globalRef().__softStoreBlobUrl = url;
 }
 
 function store(): MemoryStore {
   const g = globalRef();
   if (!g.__softStore) {
-    g.__softStore = (useBlob ? null : loadFromFile()) ?? defaultStore();
+    g.__softStore = shouldUseBlob() ? defaultStore() : loadFromFile() ?? defaultStore();
   }
   return g.__softStore;
 }
 
-/** يُستدعى في بداية كل مسار API — يحمّل أحدث بيانات قبل المعالجة */
+/** يُستدعى في بداية كل مسار API — يحمّل أحدث نسخة قبل المعالجة */
 export async function initStore(): Promise<void> {
   const g = globalRef();
-  if (useBlob) {
+  if (shouldUseBlob()) {
     const data = await readFromBlob();
-    g.__softStore = data ?? g.__softStore ?? defaultStore();
+    g.__softStore = data ?? defaultStore();
   } else if (!g.__softStore) {
     g.__softStore = loadFromFile() ?? defaultStore();
   }
@@ -233,16 +233,17 @@ export async function initStore(): Promise<void> {
 /** يُستدعى في نهاية كل مسار API — يحفظ التغييرات في السحابة إن وُجدت */
 export async function flushStore(): Promise<void> {
   if (!dirty) return;
-  dirty = false;
-  if (useBlob) {
+  if (shouldUseBlob()) {
     try {
       await writeToBlob(store());
+      dirty = false;
     } catch (e) {
-      dirty = true;
       console.error("تعذّر حفظ التخزين السحابي:", e);
       throw e;
     }
+    return;
   }
+  dirty = false;
 }
 
 function runMaintenance(): void {
@@ -334,7 +335,14 @@ function ensureReminderNotifications(): void {
 
 function persist(): void {
   dirty = true;
-  if (!useBlob) saveToFile(store());
+  if (!shouldUseBlob()) {
+    saveToFile(store());
+    if (process.env.VERCEL) {
+      console.error(
+        "BLOB_READ_WRITE_TOKEN غير مضبوط على Vercel — الحجوزات تُحفظ في الذاكرة فقط ولن تبقى بعد التحديث",
+      );
+    }
+  }
 }
 
 function promoContext() {
