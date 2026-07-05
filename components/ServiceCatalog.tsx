@@ -34,7 +34,9 @@ export default function ServiceCatalog({ services, addons, onAddToCart }: Props)
   };
 
   const handleAdd = (service: CatalogService) => {
-    if (service.pricing_model === "custom") return;
+    if (service.pricing_model === "custom") {
+      return;
+    }
 
     const needsOptions =
       service.pricing_model === "tiered_people" || service.optional_addons;

@@ -108,6 +108,28 @@ function defaultStore(): StoreData {
   };
 }
 
+function mergeServices(stored: CatalogService[] | undefined): CatalogService[] {
+  const map = new Map(DEFAULT_SERVICES.map((s) => [s.id, { ...s }]));
+  for (const s of asArray<CatalogService>(stored)) {
+    const seed = map.get(s.id);
+    if (seed) {
+      const merged: CatalogService = { ...seed, ...s };
+      // إصلاح بيانات قديمة: custom يمنع الحجز — نُعيد تعريف البذرة
+      if (seed.pricing_model !== "custom" && merged.pricing_model === "custom") {
+        merged.pricing_model = seed.pricing_model;
+        merged.bundle_price = seed.bundle_price ?? merged.bundle_price;
+        merged.price = seed.price ?? merged.price;
+        merged.bundle_includes = seed.bundle_includes ?? merged.bundle_includes;
+        merged.region_surcharge = seed.region_surcharge ?? merged.region_surcharge;
+      }
+      map.set(s.id, merged);
+    } else {
+      map.set(s.id, s);
+    }
+  }
+  return Array.from(map.values());
+}
+
 function migrateStore(parsed: Partial<StoreData>): StoreData {
   const base = defaultStore();
   const mergedSettings = { ...DEFAULT_SETTINGS, ...parsed.settings };
@@ -119,6 +141,7 @@ function migrateStore(parsed: Partial<StoreData>): StoreData {
     ...base,
     ...parsed,
     settings: mergedSettings,
+    services: mergeServices(parsed.services),
     gifts: asArray(parsed.gifts),
     bookings: asArray(parsed.bookings),
     loyalty: asArray(parsed.loyalty),
@@ -187,6 +210,11 @@ function globalRef(): typeof globalThis & GlobalStore {
 }
 
 let dirty = false;
+const dirtyBookingIds = new Set<string>();
+
+function markBookingDirty(id: string): void {
+  dirtyBookingIds.add(id.trim());
+}
 
 function loadFromFile(): StoreData | null {
   try {
@@ -415,7 +443,9 @@ export async function flushStore(): Promise<void> {
       readBackBookings: readBack?.bookings.length ?? null,
       persisted,
       storePath: BLOB_STORE_PATH,
+      dirtyBookingIds: Array.from(dirtyBookingIds),
     });
+    dirtyBookingIds.clear();
   } catch (e) {
     blobDiag("FLUSH_ERROR", { error: e instanceof Error ? e.message : String(e) });
     console.error("تعذّر حفظ التخزين السحابي:", e);
@@ -872,8 +902,19 @@ export function createBooking(input: {
   });
 
   if (pricing.lines.length === 0 || pricing.totalDuration <= 0) {
-    throw new Error("اختيار خدمة واحدة على الأقل");
+    const cartIds = asArray<CartItem>(input.cart).map((c) => c.serviceId);
+    console.error("[createBooking] REJECTED empty pricing | cart serviceIds:", cartIds);
+    throw new Error("اختيار خدمة واحدة على الأقل — تأكدي أن الخدمة ما زالت متاحة");
   }
+
+  console.log(
+    "[createBooking] pricing OK | services:",
+    pricing.lines.map((l) => l.service_id),
+    "| duration:",
+    pricing.totalDuration,
+    "| deposit:",
+    pricing.requiresDeposit,
+  );
 
   const finalPrice = pricing.finalTotal ?? pricing.totalPrice;
   const start = new Date(input.startTime);
@@ -940,6 +981,7 @@ export function createBooking(input: {
 
   commitPromotions(booking, input.promo, phone);
   store().bookings.push(booking);
+  markBookingDirty(booking.id);
   if (status === "confirmed") {
     emitBookingNotifications("booking_confirmed", booking);
   } else {
@@ -1345,6 +1387,7 @@ export async function confirmDemoPayment(id: string): Promise<BookingWithService
     emitBookingNotifications("booking_confirmed", b);
   }
   b.moyasar_payment_id = "demo-local";
+  markBookingDirty(b.id);
   persist();
   console.log("[confirmDemoPayment] DONE id:", b.id, "| status after:", b.status);
   return b;

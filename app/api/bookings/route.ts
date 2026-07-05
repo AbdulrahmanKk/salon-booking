@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { asArray } from "@/lib/arrays";
-import { createBooking, getAllBookings, type PromotionInput } from "@/lib/memory-store";
+import { createBooking, getAllBookings, getAllServicesAdmin, type PromotionInput } from "@/lib/memory-store";
 import { withStore } from "@/lib/with-store";
 import type { BookingWithServices, CartItem, Region, ServiceSelection } from "@/lib/types";
 
@@ -49,6 +49,18 @@ async function handlePOST(request: NextRequest) {
     );
     if (!hasCart && !hasSel) {
       return NextResponse.json({ error: "اختيار خدمة واحدة على الأقل" }, { status: 400 });
+    }
+
+    const catalog = getAllServicesAdmin();
+    for (const item of asArray<CartItem>(cart)) {
+      const svc = catalog.find((s) => s.id === item.serviceId && s.active !== false);
+      if (!svc) {
+        console.error("[bookings/POST] خدمة غير موجودة في الكتالوج:", item.serviceId);
+        return NextResponse.json(
+          { error: `الخدمة غير موجودة أو غير متاحة: ${item.serviceId}` },
+          { status: 400 },
+        );
+      }
     }
 
     const { booking, amountHalala } = createBooking({
