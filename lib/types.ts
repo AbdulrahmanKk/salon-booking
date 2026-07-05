@@ -73,6 +73,8 @@ export interface ServiceSelection {
 
 export interface ServiceLine {
   service_id: string;
+  /** مفتاح القسم الإنجليزي الموحّد — يُحفظ مع الحجز لتطابق العرض */
+  category?: ServiceCategory;
   quantity: number;
   people_count: number;
   name: string;

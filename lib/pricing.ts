@@ -2,6 +2,7 @@
  * محرك التسعير — شرائح الأشخاص، زيادات المنطقة، التوصيل، الإضافات
  */
 
+import { normalizeServiceCategory } from "./categories";
 import type {
   CartItem,
   CatalogService,
@@ -113,8 +114,10 @@ export function calculateCartPricing(
       totalDuration += duration * count;
     }
 
+    const category = normalizeServiceCategory(service.category) ?? service.category;
     lines.push({
       service_id: service.id,
+      category,
       quantity: service.pricing_model === "fixed" ? count : 1,
       people_count: count,
       name: service.name,

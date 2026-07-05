@@ -5,6 +5,7 @@ import { asArray } from "@/lib/arrays";
 import type { BookingWithServices } from "@/lib/types";
 import { formatServicesSummary, REGION_LABELS } from "@/lib/types";
 
+const RIYADH_TZ = "Asia/Riyadh";
 const HOURS = Array.from({ length: 11 }, (_, i) => i + 14);
 
 function formatTime12(iso: string): string {
@@ -12,8 +13,53 @@ function formatTime12(iso: string): string {
     hour: "numeric",
     minute: "2-digit",
     hour12: true,
-    timeZone: "Asia/Riyadh",
+    timeZone: RIYADH_TZ,
   }).replace("ص", "صباحاً").replace("م", "مساءً");
+}
+
+function riyadhDateKey(iso: string): string {
+  return new Date(iso).toLocaleDateString("en-CA", { timeZone: RIYADH_TZ });
+}
+
+function riyadhHour(iso: string): number {
+  return parseInt(
+    new Intl.DateTimeFormat("en-GB", {
+      hour: "numeric",
+      hour12: false,
+      timeZone: RIYADH_TZ,
+    }).format(new Date(iso)),
+    10,
+  );
+}
+
+function calendarDayKey(day: Date): string {
+  return day.toLocaleDateString("en-CA", { timeZone: RIYADH_TZ });
+}
+
+/** هل الحجز يظهر في خلية يوم+ساعة (توقيت الرياض) — يدعم الحجوزات الطويلة وعبور منتصف الليل */
+function bookingCoversHour(booking: BookingWithServices, day: Date, hour: number): boolean {
+  const dayKey = calendarDayKey(day);
+  const startDay = riyadhDateKey(booking.start_time);
+  const endDay = riyadhDateKey(booking.end_time);
+  if (dayKey < startDay || dayKey > endDay) return false;
+
+  const startH = riyadhHour(booking.start_time);
+  const endH = riyadhHour(booking.end_time);
+
+  if (startDay === endDay && dayKey === startDay) {
+    if (endH >= startH) return hour >= startH && hour <= endH;
+    return hour >= startH || hour <= endH;
+  }
+  if (dayKey === startDay) return hour >= startH;
+  if (dayKey === endDay) return hour <= endH;
+  return true;
+}
+
+function bookingOverlapsDay(booking: BookingWithServices, day: Date): boolean {
+  const dayKey = calendarDayKey(day);
+  const startDay = riyadhDateKey(booking.start_time);
+  const endDay = riyadhDateKey(booking.end_time);
+  return dayKey >= startDay && dayKey <= endDay;
 }
 
 function startOfWeek(d: Date): Date {
@@ -43,10 +89,8 @@ export default function AdminCalendar({ bookings: bookingsProp, onAddManual, onR
     });
   }, [weekStart]);
 
-  const bookingsForDay = (day: Date) => {
-    const key = day.toDateString();
-    return bookings.filter((b) => new Date(b.start_time).toDateString() === key);
-  };
+  const bookingsForDay = (day: Date) =>
+    bookings.filter((b) => bookingOverlapsDay(b, day));
 
   const shiftWeek = (delta: number) => {
     setWeekStart((prev) => {
@@ -75,7 +119,7 @@ export default function AdminCalendar({ bookings: bookingsProp, onAddManual, onR
           <div className="border-b border-salon-blush bg-salon-blush/30 p-2" />
           {weekDays.map((day) => (
             <div key={day.toISOString()} className="border-b border-r border-salon-blush bg-salon-blush/30 p-2 text-center text-sm font-semibold">
-              {day.toLocaleDateString("ar-SA", { weekday: "short", day: "numeric", month: "short" })}
+              {day.toLocaleDateString("ar-SA", { weekday: "short", day: "numeric", month: "short", timeZone: RIYADH_TZ })}
             </div>
           ))}
 
@@ -85,10 +129,7 @@ export default function AdminCalendar({ bookings: bookingsProp, onAddManual, onR
                 {hour > 12 ? hour - 12 : hour}{hour >= 12 ? " م" : " ص"}
               </div>
               {weekDays.map((day) => {
-                const dayBookings = bookingsForDay(day).filter((b) => {
-                  const h = new Date(b.start_time).getHours();
-                  return h === hour || (h < hour && new Date(b.end_time).getHours() > hour);
-                });
+                const dayBookings = bookingsForDay(day).filter((b) => bookingCoversHour(b, day, hour));
                 return (
                   <div
                     key={`${day.toISOString()}-${hour}`}

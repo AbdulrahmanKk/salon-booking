@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { asArray } from "@/lib/arrays";
+import { bookingServiceCategories } from "@/lib/categories";
 import { createBooking, getAllBookings, getAllServicesAdmin, type PromotionInput } from "@/lib/memory-store";
 import { withStore } from "@/lib/with-store";
 import type { BookingWithServices, CartItem, Region, ServiceSelection } from "@/lib/types";
@@ -88,5 +89,9 @@ async function handlePOST(request: NextRequest) {
 }
 
 async function handleGET() {
-  return NextResponse.json(asArray<BookingWithServices>(getAllBookings()));
+  const bookings = asArray<BookingWithServices>(getAllBookings());
+  const catalog = getAllServicesAdmin();
+  const hairCount = bookings.filter((b) => bookingServiceCategories(b, catalog).includes("hair")).length;
+  console.log("[bookings/GET] total:", bookings.length, "| hair:", hairCount);
+  return NextResponse.json(bookings);
 }

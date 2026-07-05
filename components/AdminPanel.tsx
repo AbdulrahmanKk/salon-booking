@@ -2,8 +2,9 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { asArray } from "@/lib/arrays";
-import type { BookingStatus, BookingWithServices, CatalogService, PaymentStatus, Region, ServiceSelection, Therapist } from "@/lib/types";
-import { formatServicesSummary, PAYMENT_LABELS, REGION_LABELS, STATUS_LABELS, VISIT_STATUS_LABELS } from "@/lib/types";
+import { bookingServiceCategories, logBookingCategorySnapshot, resolveLineCategory } from "@/lib/categories";
+import type { BookingStatus, BookingWithServices, CatalogService, PaymentStatus, Region, ServiceCategory, ServiceSelection, Therapist } from "@/lib/types";
+import { CATEGORY_LABELS, formatServicesSummary, PAYMENT_LABELS, REGION_LABELS, STATUS_LABELS, VISIT_STATUS_LABELS } from "@/lib/types";
 import AdminCalendar from "./AdminCalendar";
 import AdminGifts from "./AdminGifts";
 import AdminMap from "./AdminMap";
@@ -53,6 +54,20 @@ export default function AdminPanel() {
       if (!bRes.ok) throw new Error(bData.error);
       const safeBookings = asArray<BookingWithServices>(bData);
       const safeServices = asArray<CatalogService>(sData.services ?? sData);
+      for (const b of safeBookings) {
+        const isHair = b.services?.some(
+          (l) => l.service_id.startsWith("hair-") || resolveLineCategory(l, safeServices) === "hair",
+        );
+        if (isHair) {
+          logBookingCategorySnapshot("AdminPanel/load", b, safeServices);
+        }
+      }
+      console.log(
+        "[AdminPanel] bookings loaded:",
+        safeBookings.length,
+        "| hair:",
+        safeBookings.filter((b) => bookingServiceCategories(b, safeServices).includes("hair")).length,
+      );
       setBookings(safeBookings);
       setServices(safeServices);
       setTherapists(asArray<Therapist>(tData.therapists));
@@ -162,6 +177,11 @@ export default function AdminPanel() {
       timeStyle: "short",
       hour12: true,
     }).replace("ص", "ص").replace("م", "م");
+
+  const formatCategories = (b: BookingWithServices): string => {
+    const cats = bookingServiceCategories(b, services);
+    return cats.map((c) => CATEGORY_LABELS[c as ServiceCategory] ?? c).join("، ") || "—";
+  };
 
   if (loading) return <p className="text-center text-salon-mauve">جاري التحميل...</p>;
 
@@ -306,6 +326,7 @@ export default function AdminPanel() {
                 <th className="p-3">الاسم</th>
                 <th className="p-3">الوقت</th>
                 <th className="p-3">المنطقة</th>
+                <th className="p-3">القسم</th>
                 <th className="p-3">الخدمات</th>
                 <th className="p-3">المدة</th>
                 <th className="p-3">السعر</th>
@@ -321,7 +342,7 @@ export default function AdminPanel() {
             </thead>
             <tbody>
               {bookings.length === 0 ? (
-                <tr><td colSpan={14} className="p-8 text-center text-salon-mauve">لا توجد حجوزات</td></tr>
+                <tr><td colSpan={15} className="p-8 text-center text-salon-mauve">لا توجد حجوزات</td></tr>
               ) : (
                 bookings.map((b) => (
                   <tr key={b.id} className="border-b border-salon-blush/60 hover:bg-salon-cream/50">
@@ -331,6 +352,7 @@ export default function AdminPanel() {
                       <div className="text-xs text-salon-mauve">→ {formatTime(b.end_time)}</div>
                     </td>
                     <td className="p-3">{REGION_LABELS[b.region]}</td>
+                    <td className="p-3 text-xs">{formatCategories(b)}</td>
                     <td className="p-3 max-w-[200px]">{formatServicesSummary(b.services)}</td>
                     <td className="p-3">{b.total_duration} د</td>
                     <td className="p-3">{b.total_price} ر.س</td>

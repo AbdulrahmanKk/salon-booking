@@ -7,6 +7,7 @@ import { BlobNotFoundError, get, put } from "@vercel/blob";
 import { join } from "path";
 import { randomUUID } from "crypto";
 import { asArray } from "./arrays";
+import { normalizeServiceCategory, logBookingCategorySnapshot } from "./categories";
 import { normalizePhone, phonesMatch } from "./customer";
 import { getLoyaltyDiscountPercent, getNextLoyaltyTier } from "./loyalty";
 import { calculateCartPricing, calculateFromSelections } from "./pricing";
@@ -74,6 +75,8 @@ interface StoreData {
   addons: ServiceAddon[];
   therapists: Therapist[];
   bookings: BookingWithServices[];
+  /** فهرس كل معرّفات الحجوزات — لاستعادة الحجوزات الناقصة من ملفات Blob الفردية */
+  bookingIndex?: string[];
   gifts: GiftCard[];
   loyalty: CustomerLoyalty[];
   customerNames: Record<string, string>;
@@ -122,9 +125,13 @@ function mergeServices(stored: CatalogService[] | undefined): CatalogService[] {
         merged.bundle_includes = seed.bundle_includes ?? merged.bundle_includes;
         merged.region_surcharge = seed.region_surcharge ?? merged.region_surcharge;
       }
+      const normalized = normalizeServiceCategory(String(merged.category));
+      if (normalized) merged.category = normalized;
+      else if (seed) merged.category = seed.category;
       map.set(s.id, merged);
     } else {
-      map.set(s.id, s);
+      const normalized = normalizeServiceCategory(String(s.category));
+      map.set(s.id, normalized ? { ...s, category: normalized } : s);
     }
   }
   return Array.from(map.values());
@@ -144,6 +151,9 @@ function migrateStore(parsed: Partial<StoreData>): StoreData {
     services: mergeServices(parsed.services),
     gifts: asArray(parsed.gifts),
     bookings: asArray(parsed.bookings),
+    bookingIndex: asArray<string>(parsed.bookingIndex).length
+      ? Array.from(new Set(asArray<string>(parsed.bookingIndex)))
+      : asArray<BookingWithServices>(parsed.bookings).map((b) => b.id),
     loyalty: asArray(parsed.loyalty),
     customerNames: parsed.customerNames ?? {},
     discountCodes: asArray(parsed.discountCodes).length
@@ -319,6 +329,15 @@ async function readBookingFromBlob(id: string): Promise<BookingWithServices | nu
 
 async function writeToBlob(data: StoreData): Promise<void> {
   const hasToken = Boolean(process.env.BLOB_READ_WRITE_TOKEN?.trim());
+
+  const fresh = await readFromBlob();
+  if (fresh?.bookings.length) {
+    data.bookings = mergeBookingsById(data.bookings, fresh.bookings);
+    data.bookingIndex = Array.from(
+      new Set([...asArray<string>(data.bookingIndex), ...data.bookings.map((b) => b.id)]),
+    );
+  }
+
   const payload = JSON.stringify(data);
   const ids = data.bookings.map((b) => b.id);
   console.log(
@@ -361,6 +380,37 @@ function store(): MemoryStore {
   return g.__softStore;
 }
 
+function mergeBookingsById(
+  primary: BookingWithServices[],
+  secondary: BookingWithServices[],
+): BookingWithServices[] {
+  const map = new Map<string, BookingWithServices>();
+  for (const b of secondary) map.set(b.id, b);
+  for (const b of primary) map.set(b.id, b);
+  return Array.from(map.values());
+}
+
+/** استعادة حجوزات موجودة في الفهرس/ملفات Blob لكن ناقصة من store.json */
+async function reconcileBookingsFromIndex(): Promise<void> {
+  const s = store();
+  const index = Array.from(new Set([...asArray<string>(s.bookingIndex), ...s.bookings.map((b) => b.id)]));
+  s.bookingIndex = index;
+
+  let restored = 0;
+  for (const id of index) {
+    if (s.bookings.some((b) => b.id === id)) continue;
+    if (!shouldUseBlob()) continue;
+    const fromBlob = await readBookingFromBlob(id);
+    if (fromBlob) {
+      s.bookings.push(fromBlob);
+      restored += 1;
+      console.log("[reconcileBookings] restored from booking file | id:", id);
+      logBookingCategorySnapshot("reconcile", fromBlob, s.services);
+    }
+  }
+  if (restored > 0) persist();
+}
+
 /** يُستدعى في بداية كل مسار API — يحمّل أحدث نسخة قبل المعالجة */
 export async function initStore(): Promise<void> {
   const g = globalRef();
@@ -378,6 +428,7 @@ export async function initStore(): Promise<void> {
       g.__softStore = defaultStore();
       blobDiag("INIT_NEW", { bookingsCount: 0, source: "defaultStore" });
     }
+    await reconcileBookingsFromIndex();
   } else if (!g.__softStore) {
     g.__softStore = loadFromFile() ?? defaultStore();
     blobDiag("INIT_LOCAL", {
@@ -868,9 +919,17 @@ export function getBookingsForSchedule(): BookingForSchedule[] {
 }
 
 export function getAllBookings(): BookingWithServices[] {
-  return [...store().bookings].sort(
+  const catalog = store().services;
+  const sorted = [...store().bookings].sort(
     (a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime(),
   );
+  for (const b of sorted) {
+    const isHair = b.services?.some(
+      (l) => l.service_id.startsWith("hair-") || l.category === "hair",
+    );
+    if (isHair) logBookingCategorySnapshot("GET/display", b, catalog);
+  }
+  return sorted;
 }
 
 export function getBookingsByPhone(phone: string): BookingWithServices[] {
@@ -981,7 +1040,9 @@ export function createBooking(input: {
 
   commitPromotions(booking, input.promo, phone);
   store().bookings.push(booking);
+  trackBookingId(booking.id);
   markBookingDirty(booking.id);
+  logBookingCategorySnapshot("SAVE/create", booking, store().services);
   if (status === "confirmed") {
     emitBookingNotifications("booking_confirmed", booking);
   } else {
@@ -1322,10 +1383,17 @@ async function reloadBookingFromBlob(id: string): Promise<BookingWithServices | 
   return null;
 }
 
+function trackBookingId(id: string): void {
+  const s = store();
+  if (!s.bookingIndex) s.bookingIndex = s.bookings.map((b) => b.id);
+  if (!s.bookingIndex.includes(id)) s.bookingIndex.push(id);
+}
+
 function mergeBookingIntoStore(booking: BookingWithServices): BookingWithServices {
   const existing = store().bookings.find((b) => b.id === booking.id);
   if (existing) return existing;
   store().bookings.push(booking);
+  trackBookingId(booking.id);
   persist();
   console.log("[mergeBookingIntoStore] merged id:", booking.id);
   return booking;
