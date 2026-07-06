@@ -94,6 +94,8 @@ export interface CartItem {
   serviceId: string;
   peopleCount: number;
   addonIds: string[];
+  /** مرافقات العروس (اختياري) — للخدمات التي تحتوي «عروس» */
+  companionsCount?: number;
 }
 
 export interface SalonSettings {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { asArray } from "@/lib/arrays";
 import type {
@@ -13,6 +13,8 @@ import type {
 } from "@/lib/types";
 import { REGION_LABELS } from "@/lib/types";
 import type { SectionConfig } from "@/lib/sections";
+import { isBrideService } from "@/lib/service-helpers";
+import AddToCartToast from "./AddToCartToast";
 import SectionServiceList from "./SectionServiceList";
 import TimeSlotPicker from "./TimeSlotPicker";
 
@@ -50,6 +52,11 @@ export default function SectionBookingForm({ section }: Props) {
   const [confirmedLabel, setConfirmedLabel] = useState("");
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [toast, setToast] = useState<{ message: string; visible: boolean }>({
+    message: "",
+    visible: false,
+  });
+  const cartRef = useRef<HTMLElement>(null);
 
   const sectionServices = services.filter((s) =>
     section.categories.includes(s.category),
@@ -66,9 +73,21 @@ export default function SectionBookingForm({ section }: Props) {
   }, []);
 
   const addToCart = (item: Omit<CartItem, "lineId">) => {
+    const svc = services.find((s) => s.id === item.serviceId);
     setCart((prev) => [...prev, { ...item, lineId: newLineId() }]);
     setSlotPreview(null);
     setSelectedSlot(null);
+    setToast({
+      visible: true,
+      message: svc ? `تمت إضافة «${svc.name}» إلى السلة` : "تمت الإضافة إلى السلة",
+    });
+    requestAnimationFrame(() => {
+      cartRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  };
+
+  const showAddError = (message: string) => {
+    setToast({ visible: true, message });
   };
 
   const removeFromCart = (lineId: string) => {
@@ -155,6 +174,15 @@ export default function SectionBookingForm({ section }: Props) {
     }
     setSubmitting(true);
     try {
+      const companionNotes = cart
+        .filter((item) => (item.companionsCount ?? 0) > 0)
+        .map((item) => {
+          const svc = services.find((s) => s.id === item.serviceId);
+          return `${svc?.name ?? item.serviceId}: ${item.companionsCount} مرافقة`;
+        })
+        .join(" · ");
+      const notesCombined = [customerNotes.trim(), companionNotes].filter(Boolean).join("\n");
+
       const res = await fetch("/api/bookings", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -162,7 +190,7 @@ export default function SectionBookingForm({ section }: Props) {
           customerName: name,
           customerPhone: phone,
           locationUrl,
-          customerNotes,
+          customerNotes: notesCombined || undefined,
           region,
           cart,
           startTime: selectedSlot,
@@ -199,6 +227,12 @@ export default function SectionBookingForm({ section }: Props) {
 
   return (
     <div className="mx-auto max-w-page px-6 py-12 md:py-16">
+      <AddToCartToast
+        message={toast.message}
+        visible={toast.visible}
+        onHide={() => setToast((t) => ({ ...t, visible: false }))}
+      />
+
       <Link href="/" className="btn-ghost mb-10 inline-block">
         ← الرئيسية
       </Link>
@@ -216,21 +250,30 @@ export default function SectionBookingForm({ section }: Props) {
         <SectionServiceList
           services={sectionServices}
           addons={addons}
+          cart={cart}
           onAddToCart={addToCart}
+          onAddError={showAddError}
         />
       </section>
 
       {cart.length > 0 && (
-        <section className="mb-12 border border-sm-border p-6 md:p-8">
-          <h2 className="mb-4 text-sm font-medium text-sm-muted">السلة</h2>
+        <section
+          ref={cartRef}
+          className="mb-12 scroll-mt-24 border border-sm-border p-6 md:p-8"
+        >
+          <h2 className="mb-4 text-sm font-medium text-sm-muted">سلة التسوق</h2>
           <ul className="space-y-3">
             {cart.map((item) => {
               const svc = services.find((s) => s.id === item.serviceId);
+              const bride = svc && isBrideService(svc);
               return (
                 <li key={item.lineId} className="flex items-center justify-between gap-4 text-sm">
                   <span>
                     {svc?.name}
-                    {item.peopleCount > 1 ? ` × ${item.peopleCount}` : ""}
+                    {!bride && item.peopleCount > 1 ? ` × ${item.peopleCount}` : ""}
+                    {bride && (item.companionsCount ?? 0) > 0
+                      ? ` · ${item.companionsCount} مرافقة`
+                      : ""}
                   </span>
                   <button
                     type="button"
