@@ -3,6 +3,7 @@
  */
 
 import { normalizeServiceCategory } from "./categories";
+import { computeCartItemDuration } from "./duration";
 import type {
   CartItem,
   CatalogService,
@@ -105,12 +106,7 @@ export function calculateCartPricing(
     peopleCount += count;
     subtotal += price;
     regionSurchargeTotal += surcharge;
-
-    if (service.pricing_model === "bundle" || service.pricing_model === "custom") {
-      totalDuration += duration;
-    } else {
-      totalDuration += duration * count;
-    }
+    totalDuration += computeCartItemDuration(item, service, addons);
 
     const category = normalizeServiceCategory(service.category) ?? service.category;
     lines.push({

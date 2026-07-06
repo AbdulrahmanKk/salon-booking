@@ -197,6 +197,80 @@ export function getAvailableSlots(
   return slots;
 }
 
+/** أوقات متاحة ليوم محدّد فقط */
+export function getAvailableSlotsForDay(
+  existingBookings: BookingForSchedule[],
+  region: Region,
+  durationMinutes: number,
+  settings: SalonSettings,
+  day: Date,
+  therapistId?: number,
+  notBefore: Date = new Date(),
+): SlotWithTherapist[] {
+  if (durationMinutes <= 0) return [];
+
+  const slots: SlotWithTherapist[] = [];
+  const interval = settings.slotIntervalMinutes;
+  const therapists =
+    therapistId != null
+      ? [therapistId]
+      : Array.from({ length: settings.therapistCount }, (_, i) => i + 1);
+
+  const dayStart = getDayBusinessStart(day, settings);
+  const dayEnd = getDayBusinessEnd(day, settings);
+
+  let cursor = roundUpToSlot(dayStart, interval);
+  const sameDay =
+    day.toDateString() === notBefore.toDateString() ||
+    day.toLocaleDateString("en-CA", { timeZone: RIYADH_TZ }) ===
+      notBefore.toLocaleDateString("en-CA", { timeZone: RIYADH_TZ });
+  if (sameDay && cursor < notBefore) {
+    cursor = roundUpToSlot(notBefore, interval);
+  }
+
+  while (cursor < dayEnd) {
+    const end = calculateEndTime(cursor, durationMinutes);
+    if (end > dayEnd) break;
+
+    for (const t of therapists) {
+      const therapistBookings = bookingsForTherapist(existingBookings, t);
+      if (
+        isSlotValidForTherapist(
+          cursor,
+          end,
+          region,
+          therapistBookings,
+          settings.prepTimeMinutes,
+        )
+      ) {
+        slots.push({ start: new Date(cursor), therapistId: t });
+        break;
+      }
+    }
+    cursor = addMinutes(cursor, interval);
+  }
+
+  return slots;
+}
+
+export function parseRiyadhDateKey(dateKey: string): Date {
+  const [y, m, d] = dateKey.split("-").map(Number);
+  const date = new Date();
+  date.setFullYear(y, m - 1, d);
+  date.setHours(0, 0, 0, 0);
+  return date;
+}
+
+export function riyadhDateKey(date: Date = new Date()): string {
+  return date.toLocaleDateString("en-CA", { timeZone: RIYADH_TZ });
+}
+
+export function maxBookableDateKey(settings: SalonSettings): string {
+  const d = new Date();
+  d.setDate(d.getDate() + settings.daysAhead);
+  return riyadhDateKey(d);
+}
+
 export function formatTimeAr12(date: Date): string {
   const str = date.toLocaleTimeString("ar-SA", {
     hour: "numeric",

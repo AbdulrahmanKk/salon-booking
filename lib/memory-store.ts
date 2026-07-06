@@ -30,9 +30,12 @@ import {
   calculateEndTime,
   findAvailableTherapist,
   getAvailableSlots,
+  getAvailableSlotsForDay,
   isSlotValidForTherapist,
   bookingsForTherapist,
+  parseRiyadhDateKey,
 } from "./scheduling";
+import { computeCartItemDuration } from "./duration";
 import {
   DEFAULT_ADDONS,
   DEFAULT_DISCOUNT_CODES,
@@ -1111,6 +1114,42 @@ export function getSlotsForSelections(
     peopleCount: pricing.peopleCount,
     requiresDeposit: pricing.requiresDeposit,
     adjustments: pricing.adjustments,
+  };
+}
+
+/** أوقات يوم محدّد لخدمة واحدة (تقويم مستقل + مدة تشمل المرافقات) */
+export function getSlotsForCartItem(region: Region, item: CartItem, dateKey: string) {
+  const settings = getSettings();
+  const catalog = store().services;
+  const addons = store().addons;
+  const service = catalog.find((s) => s.id === item.serviceId && s.active !== false);
+  if (!service) throw new Error("الخدمة غير موجودة");
+
+  const duration = computeCartItemDuration(item, service, addons);
+  const scheduleGroup = resolveScheduleGroupFromCart([item], catalog);
+  const therapistId = SCHEDULE_GROUP_THERAPIST[scheduleGroup];
+  const existing = bookingsForScheduleGroup(getBookingsForSchedule(), scheduleGroup, catalog);
+  const day = parseRiyadhDateKey(dateKey);
+  const rawSlots = getAvailableSlotsForDay(
+    existing,
+    region,
+    duration,
+    settings,
+    day,
+    therapistId,
+  );
+  const pricing = calculateCartPricing([item], catalog, addons, settings, region);
+
+  return {
+    slots: rawSlots,
+    scheduleGroup,
+    totalDuration: duration,
+    totalPrice: pricing.finalTotal ?? pricing.totalPrice,
+    subtotal: pricing.subtotal,
+    deliveryFee: pricing.deliveryFee,
+    regionSurchargeTotal: pricing.regionSurchargeTotal,
+    peopleCount: pricing.peopleCount,
+    requiresDeposit: false,
   };
 }
 

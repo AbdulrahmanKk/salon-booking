@@ -1,13 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { asArray } from "@/lib/arrays";
 import {
-  earliestAfterLastBooking,
-  formatDateShort,
   formatDateTimeAr,
   formatTimeAr12,
+  maxBookableDateKey,
+  riyadhDateKey,
 } from "@/lib/scheduling";
-import { getBookingsForSchedule, getSettings, getSlotsForSelections } from "@/lib/memory-store";
-import type { CartItem, Region, ServiceSelection } from "@/lib/types";
+import { getSettings, getSlotsForCartItem } from "@/lib/memory-store";
+import type { CartItem, Region } from "@/lib/types";
 import { withStore } from "@/lib/with-store";
 
 export const dynamic = "force-dynamic";
@@ -16,32 +16,24 @@ export const POST = withStore(handlePOST);
 async function handlePOST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { region, serviceSelections, cart, promo, phone } = body as {
+    const { region, date, item } = body as {
       region: Region;
-      serviceSelections?: ServiceSelection[];
-      cart?: CartItem[];
-      promo?: import("@/lib/promotions").PromotionInput;
-      phone?: string;
+      date: string;
+      item: CartItem;
     };
 
-    if (!region || (!cart?.length && !serviceSelections?.length)) {
-      return NextResponse.json({ error: "المنطقة والخدمات مطلوبة" }, { status: 400 });
+    if (!region || !date || !item?.serviceId) {
+      return NextResponse.json({ error: "المنطقة والتاريخ والخدمة مطلوبة" }, { status: 400 });
     }
 
-    const result = getSlotsForSelections(region, {
-      cart: asArray(cart),
-      serviceSelections: asArray(serviceSelections),
-      promo,
-      phone,
-    });
-
     const settings = getSettings();
-    const existing = getBookingsForSchedule();
-    const { time: earliest, travelMinutes } = earliestAfterLastBooking(
-      existing,
-      region,
-      settings,
-    );
+    const today = riyadhDateKey();
+    const maxDate = maxBookableDateKey(settings);
+    if (date < today || date > maxDate) {
+      return NextResponse.json({ error: "التاريخ خارج نطاق الحجز المتاح" }, { status: 400 });
+    }
+
+    const result = getSlotsForCartItem(region, item, date);
 
     return NextResponse.json({
       slots: result.slots.map((s) => ({
@@ -49,17 +41,15 @@ async function handlePOST(request: NextRequest) {
         therapistId: s.therapistId,
         timeFormatted: formatTimeAr12(s.start),
         dateTimeFormatted: formatDateTimeAr(s.start),
-        dateLabel: formatDateShort(s.start),
       })),
       totalDuration: result.totalDuration,
       totalPrice: result.totalPrice,
       subtotal: result.subtotal,
       deliveryFee: result.deliveryFee,
       regionSurchargeTotal: result.regionSurchargeTotal,
-      peopleCount: result.peopleCount,
-      requiresDeposit: result.requiresDeposit,
-      earliestAfterLast: earliest ? formatTimeAr12(earliest) : null,
-      travelFromLastMinutes: travelMinutes,
+      scheduleGroup: result.scheduleGroup,
+      minDate: today,
+      maxDate,
     });
   } catch (e) {
     const msg = e instanceof Error ? e.message : "خطأ في الحساب";

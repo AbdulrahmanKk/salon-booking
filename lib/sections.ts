@@ -16,12 +16,11 @@ export const SECTIONS: Record<SectionSlug, SectionConfig> = {
   makeup: {
     slug: "makeup",
     scheduleGroup: "khulood",
-    title: "مكياج",
-    subtitle: "خلود الهداب",
+    title: "ميكاب ارتست — خلود الهداب",
+    subtitle: "",
     artist: "خلود الهداب",
     categories: ["makeup"],
-    footnote:
-      "الأسعار مكياج فقط — الشعر عند الطلب. زيادة 200 ريال لبعض أحياء الرياض (جنوب · شرق · غرب).",
+    footnote: "",
   },
   hair: {
     slug: "hair",

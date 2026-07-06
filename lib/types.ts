@@ -94,8 +94,13 @@ export interface CartItem {
   serviceId: string;
   peopleCount: number;
   addonIds: string[];
-  /** مرافقات العروس (اختياري) — للخدمات التي تحتوي «عروس» */
+  /** مرافقات العروس (اختياري) */
   companionsCount?: number;
+  region?: Region;
+  /** YYYY-MM-DD بتوقيت الرياض */
+  selectedDate?: string;
+  startTime?: string;
+  therapistId?: number;
 }
 
 export interface SalonSettings {
@@ -361,10 +366,10 @@ export interface GiftCard {
 }
 
 export const REGION_LABELS: Record<Region, string> = {
-  north: "شمال",
-  south: "جنوب",
-  east: "شرق",
-  west: "غرب",
+  north: "شمال الرياض",
+  south: "جنوب الرياض",
+  east: "شرق الرياض",
+  west: "غرب الرياض",
 };
 
 export const CATEGORY_LABELS: Record<ServiceCategory, string> = {

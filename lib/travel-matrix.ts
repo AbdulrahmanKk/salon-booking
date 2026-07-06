@@ -13,9 +13,12 @@ export const TRAVEL_MATRIX: Record<Region, Record<Region, number>> = {
   west:  { north: 65, south: 60, east: 70, west: 25 },
 };
 
+/** وقت التنقل بين مواقع العميلات عند الجدولة (دقائق) */
+export const SCHEDULE_TRAVEL_MINUTES = 45;
+
 /**
- * وقت الطريق بالدقائق بين منطقتين
+ * وقت الطريق بالدقائق بين موقعين — للجدولة نستخدم 45 دقيقة بين الحجوزات
  */
-export function getTravelMinutes(from: Region, to: Region): number {
-  return TRAVEL_MATRIX[from][to];
+export function getTravelMinutes(_from: Region, _to: Region): number {
+  return SCHEDULE_TRAVEL_MINUTES;
 }

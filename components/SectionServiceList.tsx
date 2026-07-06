@@ -3,111 +3,31 @@
 import { useState } from "react";
 import type { CartItem, CatalogService, ServiceAddon } from "@/lib/types";
 import { getServiceDisplayPrice, formatTierLabel } from "@/lib/pricing";
-import { isBrideService } from "@/lib/service-helpers";
+import ServiceAddPanel from "./ServiceAddPanel";
 
 interface Props {
   services: CatalogService[];
+  catalog: CatalogService[];
   addons: ServiceAddon[];
   cart: CartItem[];
   onAddToCart: (item: Omit<CartItem, "lineId">) => void;
   onAddError: (message: string) => void;
 }
 
-function Counter({
-  label,
-  value,
-  min,
-  onChange,
-}: {
-  label: string;
-  value: number;
-  min: number;
-  onChange: (n: number) => void;
-}) {
-  return (
-    <div className="flex flex-wrap items-center gap-4 text-sm">
-      <span className="text-sm-muted">{label}</span>
-      <button
-        type="button"
-        className="btn-secondary h-9 w-9 p-0"
-        onClick={() => onChange(Math.max(min, value - 1))}
-        aria-label="إنقاص"
-      >
-        −
-      </button>
-      <span className="w-8 text-center font-medium">{value}</span>
-      <button
-        type="button"
-        className="btn-secondary h-9 w-9 p-0"
-        onClick={() => onChange(value + 1)}
-        aria-label="زيادة"
-      >
-        +
-      </button>
-    </div>
-  );
-}
-
 export default function SectionServiceList({
   services,
+  catalog,
   addons,
   cart,
   onAddToCart,
   onAddError,
 }: Props) {
   const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [quantity, setQuantity] = useState(1);
-  const [companions, setCompanions] = useState(0);
-  const [selectedAddons, setSelectedAddons] = useState<string[]>([]);
-
-  const massageAddons = addons.filter((a) => a.categories.includes("massage"));
-
-  const reset = () => {
-    setQuantity(1);
-    setCompanions(0);
-    setSelectedAddons([]);
-    setExpandedId(null);
-  };
-
-  const openPanel = (service: CatalogService) => {
-    setExpandedId(service.id);
-    setQuantity(1);
-    setCompanions(0);
-    setSelectedAddons([]);
-  };
-
-  const confirmAdd = (service: CatalogService) => {
-    const bride = isBrideService(service);
-
-    if (bride && cart.some((c) => {
-      const svc = services.find((s) => s.id === c.serviceId);
-      return svc && isBrideService(svc);
-    })) {
-      onAddError("لا يُسمح بأكثر من خدمة عروس في نفس الحجز");
-      return;
-    }
-
-    const peopleCount = bride
-      ? 1
-      : service.pricing_model === "tiered_people"
-        ? quantity
-        : quantity;
-
-    onAddToCart({
-      serviceId: service.id,
-      peopleCount,
-      addonIds: selectedAddons,
-      companionsCount: bride ? companions : undefined,
-    });
-    reset();
-  };
 
   return (
     <div className="divide-y divide-sm-border border-y border-sm-border">
       {services.map((s) => {
         const isExpanded = expandedId === s.id;
-        const bride = isBrideService(s);
-        const hasAddons = Boolean(s.optional_addons && massageAddons.length > 0);
 
         return (
           <div key={s.id} className="service-row flex-col items-stretch">
@@ -129,62 +49,25 @@ export default function SectionServiceList({
               <button
                 type="button"
                 className="btn-secondary shrink-0 self-start sm:self-center"
-                onClick={() => (isExpanded ? reset() : openPanel(s))}
+                onClick={() => setExpandedId(isExpanded ? null : s.id)}
               >
                 {isExpanded ? "إلغاء" : "إضافة"}
               </button>
             </div>
 
             {isExpanded && (
-              <div className="w-full space-y-4 border-t border-sm-border pt-4">
-                {bride ? (
-                  <Counter
-                    label="عدد المرافقات (اختياري)"
-                    value={companions}
-                    min={0}
-                    onChange={setCompanions}
-                  />
-                ) : (
-                  <Counter label="العدد" value={quantity} min={1} onChange={setQuantity} />
-                )}
-
-                {hasAddons && (
-                  <div className="flex flex-wrap gap-2">
-                    {massageAddons.map((a) => (
-                      <label
-                        key={a.id}
-                        className={`cursor-pointer border px-3 py-2 text-sm ${
-                          selectedAddons.includes(a.id)
-                            ? "border-sm-text bg-sm-text text-white"
-                            : "border-sm-border"
-                        }`}
-                      >
-                        <input
-                          type="checkbox"
-                          className="sr-only"
-                          checked={selectedAddons.includes(a.id)}
-                          onChange={(e) => {
-                            setSelectedAddons((prev) =>
-                              e.target.checked
-                                ? [...prev, a.id]
-                                : prev.filter((id) => id !== a.id),
-                            );
-                          }}
-                        />
-                        {a.name} +{a.price}
-                      </label>
-                    ))}
-                  </div>
-                )}
-
-                <button
-                  type="button"
-                  className="btn-primary w-full sm:w-auto"
-                  onClick={() => confirmAdd(s)}
-                >
-                  إضافة للسلة
-                </button>
-              </div>
+              <ServiceAddPanel
+                service={s}
+                addons={addons}
+                catalog={catalog}
+                cart={cart}
+                onConfirm={(item) => {
+                  onAddToCart(item);
+                  setExpandedId(null);
+                }}
+                onError={onAddError}
+                onCancel={() => setExpandedId(null)}
+              />
             )}
           </div>
         );
