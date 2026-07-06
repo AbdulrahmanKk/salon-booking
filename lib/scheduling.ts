@@ -146,12 +146,17 @@ export function getAvailableSlots(
   durationMinutes: number,
   settings: SalonSettings,
   from: Date = new Date(),
+  therapistId?: number,
 ): SlotWithTherapist[] {
   if (durationMinutes <= 0) return [];
 
   const slots: SlotWithTherapist[] = [];
   const now = new Date(from);
   const interval = settings.slotIntervalMinutes;
+  const therapists =
+    therapistId != null
+      ? [therapistId]
+      : Array.from({ length: settings.therapistCount }, (_, i) => i + 1);
 
   for (let dayOffset = 0; dayOffset < settings.daysAhead; dayOffset++) {
     const day = new Date(now);
@@ -170,15 +175,20 @@ export function getAvailableSlots(
       const end = calculateEndTime(cursor, durationMinutes);
       if (end > dayEnd) break;
 
-      const therapistId = findAvailableTherapist(
-        cursor,
-        end,
-        region,
-        existingBookings,
-        settings,
-      );
-      if (therapistId !== null) {
-        slots.push({ start: new Date(cursor), therapistId });
+      for (const t of therapists) {
+        const therapistBookings = bookingsForTherapist(existingBookings, t);
+        if (
+          isSlotValidForTherapist(
+            cursor,
+            end,
+            region,
+            therapistBookings,
+            settings.prepTimeMinutes,
+          )
+        ) {
+          slots.push({ start: new Date(cursor), therapistId: t });
+          break;
+        }
       }
       cursor = addMinutes(cursor, interval);
     }

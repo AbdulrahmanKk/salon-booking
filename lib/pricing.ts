@@ -88,7 +88,6 @@ export function calculateCartPricing(
   let regionSurchargeTotal = 0;
   let totalDuration = 0;
   let peopleCount = 0;
-  let requiresDeposit = false;
 
   for (const item of cart) {
     const service = catalog.find((s) => s.id === item.serviceId && s.active !== false);
@@ -103,7 +102,6 @@ export function calculateCartPricing(
     );
     const surcharge = region ? getRegionSurcharge(service, region, settings, count) : 0;
 
-    if (service.requires_deposit) requiresDeposit = true;
     peopleCount += count;
     subtotal += price;
     regionSurchargeTotal += surcharge;
@@ -139,7 +137,7 @@ export function calculateCartPricing(
     totalPrice,
     totalDuration,
     peopleCount,
-    requiresDeposit,
+    requiresDeposit: false,
   };
 }
 

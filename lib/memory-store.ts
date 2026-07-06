@@ -8,6 +8,12 @@ import { join } from "path";
 import { randomUUID } from "crypto";
 import { asArray } from "./arrays";
 import { normalizeServiceCategory, logBookingCategorySnapshot } from "./categories";
+import {
+  bookingsForScheduleGroup,
+  resolveScheduleGroupFromCart,
+  scheduleGroupForServiceId,
+  SCHEDULE_GROUP_THERAPIST,
+} from "./schedule-groups";
 import { normalizePhone, phonesMatch } from "./customer";
 import { getLoyaltyDiscountPercent, getNextLoyaltyTier } from "./loyalty";
 import { calculateCartPricing, calculateFromSelections } from "./pricing";
@@ -128,10 +134,14 @@ function mergeServices(stored: CatalogService[] | undefined): CatalogService[] {
       const normalized = normalizeServiceCategory(String(merged.category));
       if (normalized) merged.category = normalized;
       else if (seed) merged.category = seed.category;
+      if (seed.schedule_group) merged.schedule_group = seed.schedule_group;
       map.set(s.id, merged);
     } else {
       const normalized = normalizeServiceCategory(String(s.category));
-      map.set(s.id, normalized ? { ...s, category: normalized } : s);
+      const merged = normalized ? { ...s, category: normalized } : { ...s };
+      const sg = scheduleGroupForServiceId(s.id);
+      if (sg) merged.schedule_group = sg;
+      map.set(s.id, merged);
     }
   }
   return Array.from(map.values());
@@ -908,13 +918,16 @@ export function createBalanceGiftCard(input: {
 // ─── الحجوزات ───
 
 export function getBookingsForSchedule(): BookingForSchedule[] {
+  const catalog = store().services;
   return store().bookings.map((b) => ({
     id: b.id,
     therapist_id: b.therapist_id,
+    schedule_group: b.schedule_group,
     region: b.region,
     start_time: b.start_time,
     end_time: b.end_time,
     status: b.status,
+    services: b.services,
   }));
 }
 
@@ -980,13 +993,22 @@ export function createBooking(input: {
   if (Number.isNaN(start.getTime())) throw new Error("وقت غير صالح");
 
   const end = calculateEndTime(start, pricing.totalDuration);
-  const existing = getBookingsForSchedule();
-
-  let therapistId = input.therapistId;
-  if (!therapistId) {
-    therapistId = findAvailableTherapist(start, end, input.region, existing, settings) ?? undefined;
-  }
-  if (!therapistId) throw new Error("الوقت المختار لم يعد متاحاً");
+  const catalog = store().services;
+  const cart = asArray<CartItem>(input.cart);
+  const scheduleGroup = cart.length
+    ? resolveScheduleGroupFromCart(cart, catalog)
+    : resolveScheduleGroupFromCart(
+        asArray<ServiceSelection>(input.serviceSelections).map((s, i) => ({
+          lineId: `sel-${i}`,
+          serviceId: s.service_id,
+          peopleCount: s.people_count ?? s.quantity,
+          addonIds: s.addon_ids ?? [],
+        })),
+        catalog,
+      );
+  const therapistId = SCHEDULE_GROUP_THERAPIST[scheduleGroup];
+  const allBookings = getBookingsForSchedule();
+  const existing = bookingsForScheduleGroup(allBookings, scheduleGroup, catalog);
 
   const therapistBookings = bookingsForTherapist(existing, therapistId);
   if (
@@ -995,11 +1017,8 @@ export function createBooking(input: {
     throw new Error("الوقت المختار لم يعد متاحاً — جرّبي وقتاً آخر");
   }
 
-  const requiresDeposit = pricing.requiresDeposit;
-  const status: BookingStatus = input.manual
-    ? requiresDeposit ? "awaiting_deposit" : "confirmed"
-    : "new";
-  const paymentStatus: PaymentStatus = requiresDeposit ? "deposit_pending" : "pending";
+  const status: BookingStatus = "confirmed";
+  const paymentStatus: PaymentStatus = "paid";
   const adj = pricing.adjustments;
 
   const booking: BookingWithServices = {
@@ -1011,6 +1030,7 @@ export function createBooking(input: {
     door_image_url: input.doorImageUrl ?? null,
     customer_notes: input.customerNotes?.trim() || null,
     therapist_id: therapistId,
+    schedule_group: scheduleGroup,
     start_time: start.toISOString(),
     end_time: end.toISOString(),
     total_duration: pricing.totalDuration,
@@ -1022,8 +1042,8 @@ export function createBooking(input: {
     people_count: pricing.peopleCount,
     status,
     payment_status: paymentStatus,
-    requires_deposit: requiresDeposit,
-    moyasar_payment_id: input.manual ? "manual-admin" : null,
+    requires_deposit: false,
+    moyasar_payment_id: null,
     created_at: new Date().toISOString(),
     booking_type: "self",
     services: pricing.lines,
@@ -1043,11 +1063,7 @@ export function createBooking(input: {
   trackBookingId(booking.id);
   markBookingDirty(booking.id);
   logBookingCategorySnapshot("SAVE/create", booking, store().services);
-  if (status === "confirmed") {
-    emitBookingNotifications("booking_confirmed", booking);
-  } else {
-    emitBookingNotifications("deposit_payment", booking);
-  }
+  emitBookingNotifications("booking_confirmed", booking);
   persist();
   console.log("[createBooking] SAVED id:", booking.id, "| blob booking path:", bookingBlobPath(booking.id));
   return { booking, amountHalala: Math.round(finalPrice * 100) };
@@ -1058,12 +1074,35 @@ export function getSlotsForSelections(
   input: { cart?: CartItem[]; serviceSelections?: ServiceSelection[]; promo?: PromotionInput; phone?: string },
 ) {
   const settings = getSettings();
+  const catalog = store().services;
   const pricing = resolvePricing({ ...input, region });
-  const existing = getBookingsForSchedule();
-  const rawSlots = getAvailableSlots(existing, region, pricing.totalDuration, settings);
+  const cart = asArray<CartItem>(input.cart);
+  const scheduleGroup = cart.length
+    ? resolveScheduleGroupFromCart(cart, catalog)
+    : resolveScheduleGroupFromCart(
+        asArray<ServiceSelection>(input.serviceSelections).map((s, i) => ({
+          lineId: `sel-${i}`,
+          serviceId: s.service_id,
+          peopleCount: s.people_count ?? s.quantity,
+          addonIds: s.addon_ids ?? [],
+        })),
+        catalog,
+      );
+  const therapistId = SCHEDULE_GROUP_THERAPIST[scheduleGroup];
+  const allBookings = getBookingsForSchedule();
+  const existing = bookingsForScheduleGroup(allBookings, scheduleGroup, catalog);
+  const rawSlots = getAvailableSlots(
+    existing,
+    region,
+    pricing.totalDuration,
+    settings,
+    new Date(),
+    therapistId,
+  );
 
   return {
     slots: rawSlots,
+    scheduleGroup,
     totalDuration: pricing.totalDuration,
     totalPrice: pricing.finalTotal ?? pricing.totalPrice,
     subtotal: pricing.subtotal,
@@ -1201,9 +1240,25 @@ export function rescheduleBooking(
   if (Number.isNaN(start.getTime())) throw new Error("وقت غير صالح");
 
   const end = calculateEndTime(start, b.total_duration);
-  const existing = getBookingsForSchedule().filter((x) => x.id !== id);
+  const catalog = store().services;
+  const scheduleGroup =
+    b.schedule_group ??
+    resolveScheduleGroupFromCart(
+      b.services.map((line, i) => ({
+        lineId: `b-${i}`,
+        serviceId: line.service_id,
+        peopleCount: line.people_count ?? line.quantity,
+        addonIds: [],
+      })),
+      catalog,
+    );
+  const tid = SCHEDULE_GROUP_THERAPIST[scheduleGroup];
+  const existing = bookingsForScheduleGroup(
+    getBookingsForSchedule().filter((x) => x.id !== id),
+    scheduleGroup,
+    catalog,
+  );
 
-  let tid = therapistId ?? b.therapist_id;
   if (
     !isSlotValidForTherapist(
       start,
@@ -1214,24 +1269,13 @@ export function rescheduleBooking(
       id,
     )
   ) {
-    tid = findAvailableTherapist(start, end, b.region, existing, settings, id) ?? tid;
-    if (
-      !isSlotValidForTherapist(
-        start,
-        end,
-        b.region,
-        bookingsForTherapist(existing, tid),
-        settings.prepTimeMinutes,
-        id,
-      )
-    ) {
-      throw new Error("الوقت الجديد غير متاح");
-    }
+    throw new Error("الوقت الجديد غير متاح");
   }
 
   b.start_time = start.toISOString();
   b.end_time = end.toISOString();
   b.therapist_id = tid;
+  b.schedule_group = scheduleGroup;
   b.visit_status = "scheduled";
   b.visit_timeline = {};
   persist();

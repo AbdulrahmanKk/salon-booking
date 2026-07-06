@@ -8,6 +8,9 @@ export type Region = "north" | "south" | "east" | "west";
 
 export type ServiceCategory = "nails" | "massage" | "makeup" | "hair";
 
+/** تقويم مستقل لكل مزوّدة */
+export type ScheduleGroup = "khulood" | "sarah" | "nails-massage";
+
 export type PricingModel = "fixed" | "tiered_people" | "bundle" | "custom";
 
 export type BookingStatus =
@@ -62,6 +65,8 @@ export interface CatalogService {
   optional_addons?: boolean;
   notes?: string;
   active?: boolean;
+  /** التقويم المستقل لهذه الخدمة */
+  schedule_group?: ScheduleGroup;
 }
 
 export interface ServiceSelection {
@@ -288,6 +293,7 @@ export interface Booking {
   door_image_url: string | null;
   customer_notes: string | null;
   therapist_id: number;
+  schedule_group?: ScheduleGroup;
   start_time: string;
   end_time: string;
   total_duration: number;
@@ -321,10 +327,12 @@ export interface BookingWithServices extends Booking {
 export interface BookingForSchedule {
   id: string;
   therapist_id: number;
+  schedule_group?: ScheduleGroup;
   region: Region;
   start_time: string;
   end_time: string;
   status: BookingStatus;
+  services?: { service_id: string }[];
 }
 
 export interface AvailableSlot {

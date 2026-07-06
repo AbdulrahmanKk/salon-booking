@@ -9,24 +9,35 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
+        sm: {
+          bg: "#FFFFFF",
+          text: "#1A1A1A",
+          muted: "#6B6B6B",
+          border: "#E8E8E8",
+          accent: "#8B7355",
+        },
         salon: {
-          cream: "#F4FBF6",
-          blush: "#E8F5E9",
-          rose: "#A5D6A7",
-          mauve: "#81A684",
-          text: "#2E4A32",
-          accent: "#66BB6A",
+          cream: "#FFFFFF",
+          blush: "#F5F5F5",
+          rose: "#E8E8E8",
+          mauve: "#6B6B6B",
+          text: "#1A1A1A",
+          accent: "#8B7355",
         },
         soft: {
-          cream: "#F4FBF6",
-          blush: "#E8F5E9",
-          rose: "#A5D6A7",
-          accent: "#81C784",
-          dark: "#4CAF50",
+          cream: "#FFFFFF",
+          blush: "#F5F5F5",
+          rose: "#E8E8E8",
+          accent: "#8B7355",
+          dark: "#6B5A45",
         },
       },
       fontFamily: {
         arabic: ["var(--font-tajawal)", "Tahoma", "sans-serif"],
+      },
+      maxWidth: {
+        page: "720px",
+        wide: "960px",
       },
     },
   },

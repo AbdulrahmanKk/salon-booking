@@ -6,7 +6,7 @@ import type { CatalogService, DiscountCode, Region, SalonSettings, ServiceAddon,
 import { DEFAULT_LOYALTY_TIERS } from "./loyalty";
 
 export const DEFAULT_SETTINGS: SalonSettings = {
-  brandName: "سوفت مومنت",
+  brandName: "Soft Moments",
   tagline: "لحظة هدوء وجمال في بيتكِ",
   logoUrl: null,
   heroImageUrl: null,
@@ -21,7 +21,7 @@ export const DEFAULT_SETTINGS: SalonSettings = {
   hairRegionSurcharge: 100,
   makeupSurchargeRegions: ["south", "east", "west"] as Region[],
   hairSurchargeRegions: ["south", "east", "west"] as Region[],
-  depositNote: "خدمات المكياج والشعر تتأكد بعد تحويل عربون — سنتواصل معكِ للتفاصيل",
+  depositNote: "",
   loyaltyTiers: DEFAULT_LOYALTY_TIERS,
   cancellationCreditPercent: 50,
   doorImageRetentionDays: 7,
@@ -66,9 +66,9 @@ export const DEFAULT_SESSION_PACKAGES: SessionPackage[] = [
 ];
 
 export const DEFAULT_THERAPISTS: Therapist[] = [
-  { id: 1, name: "ثيرابست ١", active: true },
-  { id: 2, name: "ثيرابست ٢", active: true },
-  { id: 3, name: "ثيرابست ٣", active: true },
+  { id: 1, name: "خلود الهداب", active: true },
+  { id: 2, name: "سارة الهداب", active: true },
+  { id: 3, name: "أظافر ومساج", active: true },
 ];
 
 export const DEFAULT_ADDONS: ServiceAddon[] = [
@@ -78,17 +78,16 @@ export const DEFAULT_ADDONS: ServiceAddon[] = [
 ];
 
 export const DEFAULT_SERVICES: CatalogService[] = [
-  // 💅 الأظافر
-  { id: "nail-manicure", category: "nails", name: "منيكير", pricing_model: "fixed", price: 80, duration_minutes: 30, active: true },
-  { id: "nail-pedicure", category: "nails", name: "بديكير", pricing_model: "fixed", price: 90, duration_minutes: 30, active: true },
-  { id: "nail-both", category: "nails", name: "بديكير منيكير", pricing_model: "fixed", price: 150, duration_minutes: 60, active: true },
-  { id: "nail-color-basic", category: "nails", name: "لون عادي", pricing_model: "fixed", price: 60, duration_minutes: 20, active: true },
-  { id: "nail-color-ombre", category: "nails", name: "لون أمبريه", pricing_model: "fixed", price: 200, duration_minutes: 30, active: true },
+  { id: "nail-manicure", category: "nails", schedule_group: "nails-massage", name: "منيكير", pricing_model: "fixed", price: 80, duration_minutes: 30, active: true },
+  { id: "nail-pedicure", category: "nails", schedule_group: "nails-massage", name: "بديكير", pricing_model: "fixed", price: 90, duration_minutes: 30, active: true },
+  { id: "nail-both", category: "nails", schedule_group: "nails-massage", name: "بديكير منيكير", pricing_model: "fixed", price: 150, duration_minutes: 60, active: true },
+  { id: "nail-color-basic", category: "nails", schedule_group: "nails-massage", name: "لون عادي", pricing_model: "fixed", price: 60, duration_minutes: 20, active: true },
+  { id: "nail-color-ombre", category: "nails", schedule_group: "nails-massage", name: "لون أمبريه", pricing_model: "fixed", price: 200, duration_minutes: 30, active: true },
 
-  // 💆 المساج
   {
     id: "massage-swedish",
     category: "massage",
+    schedule_group: "nails-massage",
     name: "مساج سويدي",
     pricing_model: "fixed",
     price: 250,
@@ -99,6 +98,7 @@ export const DEFAULT_SERVICES: CatalogService[] = [
   {
     id: "massage-relax",
     category: "massage",
+    schedule_group: "nails-massage",
     name: "مساج استرخاء",
     pricing_model: "fixed",
     price: 250,
@@ -107,17 +107,16 @@ export const DEFAULT_SERVICES: CatalogService[] = [
     active: true,
   },
 
-  // 💄 المكياج — خلود الهداب
   {
     id: "makeup-bride",
     category: "makeup",
-    name: "مكياج عروس",
+    schedule_group: "khulood",
+    name: "عروس",
     artist: "خلود الهداب",
     instagram: "makeup_alhddab",
     pricing_model: "fixed",
     price: 1800,
     duration_minutes: 120,
-    requires_deposit: true,
     region_surcharge: "makeup",
     notes: "الأسعار مكياج فقط — الشعر عند الطلب",
     active: true,
@@ -125,6 +124,7 @@ export const DEFAULT_SERVICES: CatalogService[] = [
   {
     id: "makeup-bride-hair",
     category: "makeup",
+    schedule_group: "khulood",
     name: "بكج عروس (مكياج + شعر)",
     artist: "خلود الهداب",
     instagram: "makeup_alhddab",
@@ -132,28 +132,28 @@ export const DEFAULT_SERVICES: CatalogService[] = [
     bundle_price: 2300,
     duration_minutes: 180,
     bundle_includes: ["مكياج عروس", "شعر عروس (شبكة)"],
-    requires_deposit: true,
     region_surcharge: "makeup",
     active: true,
   },
   {
     id: "makeup-bride-full",
     category: "makeup",
-    name: "بكج عروس (مكياج + شعر + بديكير ومنيكير)",
+    schedule_group: "khulood",
+    name: "بكج عروس شامل (مكياج + شعر + بديكير ومنيكير)",
     artist: "خلود الهداب",
     instagram: "makeup_alhddab",
     pricing_model: "bundle",
     bundle_price: 2550,
     duration_minutes: 240,
     bundle_includes: ["مكياج عروس", "شعر عروس", "بديكير ومنيكير"],
-    requires_deposit: true,
     region_surcharge: "makeup",
     active: true,
   },
   {
     id: "makeup-evening",
     category: "makeup",
-    name: "مكياج سهرة",
+    schedule_group: "khulood",
+    name: "سهرة",
     artist: "خلود الهداب",
     instagram: "makeup_alhddab",
     pricing_model: "tiered_people",
@@ -163,46 +163,30 @@ export const DEFAULT_SERVICES: CatalogService[] = [
       { minPeople: 2, maxPeople: 2, pricePerPerson: 700 },
       { minPeople: 3, maxPeople: null, pricePerPerson: 600 },
     ],
-    requires_deposit: true,
     region_surcharge: "makeup",
     notes: "السعر للشخص — يتغيّر حسب العدد",
     active: true,
   },
 
-  // 💇‍♀️ الشعر — سارة الهداب
   {
     id: "hair-bride",
     category: "hair",
-    name: "عروس (شبكة)",
+    schedule_group: "sarah",
+    name: "عروس / شبكة",
     artist: "سارة الهداب",
     instagram: "hairstylest_sk",
     pricing_model: "fixed",
     price: 800,
     duration_minutes: 90,
-    requires_deposit: true,
     region_surcharge: "hair",
     notes: "السعر يختلف بالعمر وطول الشعر — التأكيد النهائي مع الأرتست",
     active: true,
   },
   {
-    id: "hair-bride-makeup",
-    category: "hair",
-    name: "بكج عروس (شعر + مكياج)",
-    artist: "سارة الهداب",
-    instagram: "hairstylest_sk",
-    pricing_model: "bundle",
-    bundle_price: 2300,
-    duration_minutes: 180,
-    bundle_includes: ["شعر عروس (شبكة)", "مكياج عروس"],
-    requires_deposit: true,
-    region_surcharge: "hair",
-    notes: "بكج شامل — التأكيد النهائي مع الأرتست",
-    active: true,
-  },
-  {
     id: "hair-evening",
     category: "hair",
-    name: "شعر سهرة",
+    schedule_group: "sarah",
+    name: "سهرة",
     artist: "سارة الهداب",
     instagram: "hairstylest_sk",
     pricing_model: "tiered_people",
@@ -212,7 +196,6 @@ export const DEFAULT_SERVICES: CatalogService[] = [
       { minPeople: 2, maxPeople: 2, pricePerPerson: 500 },
       { minPeople: 3, maxPeople: null, pricePerPerson: 450 },
     ],
-    requires_deposit: true,
     region_surcharge: "hair",
     notes: "الإكستنشن لا يُوصل — يُشتغل عليه إن كان مركّباً بسعر مختلف",
     active: true,

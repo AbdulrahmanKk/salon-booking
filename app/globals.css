@@ -3,32 +3,48 @@
 @tailwind utilities;
 
 :root {
-  --salon-cream: #f4fbf6;
-  --salon-blush: #e8f5e9;
-  --salon-rose: #a5d6a7;
-  --salon-text: #2e4a32;
+  --sm-bg: #ffffff;
+  --sm-text: #1a1a1a;
+  --sm-muted: #6b6b6b;
+  --sm-border: #e8e8e8;
+  --sm-accent: #8b7355;
 }
 
 body {
-  background: linear-gradient(160deg, var(--salon-cream) 0%, var(--salon-blush) 100%);
+  background: var(--sm-bg);
   min-height: 100vh;
-  color: var(--salon-text);
+  color: var(--sm-text);
 }
 
 @layer components {
   .btn-primary {
-    @apply inline-flex items-center justify-center rounded-2xl bg-soft-accent px-8 py-3 text-white shadow-md transition hover:bg-soft-dark hover:shadow-lg disabled:cursor-not-allowed disabled:opacity-50;
+    @apply inline-flex items-center justify-center rounded-none border border-sm-text bg-sm-text px-10 py-4 text-base font-medium text-white transition hover:bg-white hover:text-sm-text disabled:cursor-not-allowed disabled:opacity-40;
   }
   .btn-secondary {
-    @apply inline-flex items-center justify-center rounded-2xl border-2 border-salon-rose bg-white px-6 py-2.5 text-salon-text transition hover:bg-salon-blush;
+    @apply inline-flex items-center justify-center border border-sm-border bg-white px-8 py-3 text-sm text-sm-text transition hover:border-sm-text;
+  }
+  .btn-ghost {
+    @apply text-sm text-sm-muted transition hover:text-sm-text;
   }
   .card {
-    @apply rounded-3xl border border-salon-blush bg-white/80 p-6 shadow-sm backdrop-blur-sm;
+    @apply border border-sm-border bg-white p-8 md:p-10;
+  }
+  .card-hover {
+    @apply card block transition hover:border-sm-text;
   }
   .input-field {
-    @apply w-full rounded-xl border border-salon-blush bg-white px-4 py-3 text-salon-text outline-none transition focus:border-salon-rose focus:ring-2 focus:ring-salon-rose/30;
+    @apply w-full border border-sm-border bg-white px-4 py-4 text-sm text-sm-text outline-none transition placeholder:text-sm-muted focus:border-sm-text;
   }
   .label {
-    @apply mb-2 block text-sm font-medium text-salon-text;
+    @apply mb-2 block text-sm text-sm-muted;
+  }
+  .page-title {
+    @apply text-3xl font-light tracking-tight md:text-4xl lg:text-5xl;
+  }
+  .page-subtitle {
+    @apply mt-3 text-base text-sm-muted md:text-lg;
+  }
+  .service-row {
+    @apply flex flex-col gap-4 border-b border-sm-border py-6 last:border-b-0 sm:flex-row sm:items-center sm:justify-between;
   }
 }

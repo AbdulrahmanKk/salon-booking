@@ -1,6 +1,6 @@
 ﻿import type { Metadata } from "next";
 import { Tajawal } from "next/font/google";
-import HeaderNotifications from "@/components/HeaderNotifications";
+import Link from "next/link";
 import "./globals.css";
 
 const tajawal = Tajawal({
@@ -10,8 +10,8 @@ const tajawal = Tajawal({
 });
 
 export const metadata: Metadata = {
-  title: "سوفت مومنت — خدمات منزلية في الرياض",
-  description: "احجزي خدمات التجميل والمساج في منزلك — سوفت مومنت الرياض",
+  title: "Soft Moments — حجز خدمات منزلية",
+  description: "احجزي مكياج، هير ستايل، أظافر ومساج في الرياض",
 };
 
 export default function RootLayout({
@@ -20,28 +20,20 @@ export default function RootLayout({
   return (
     <html lang="ar" dir="rtl">
       <body className={`${tajawal.variable} font-arabic antialiased`}>
-        <header className="border-b border-soft-blush/60 bg-white/70 backdrop-blur-md">
-          <div className="mx-auto max-w-6xl px-4 py-2">
-            <p className="text-center text-xs text-amber-700 bg-amber-50 rounded-lg py-1.5">
-              وضع تجريبي — بيانات محلية · الدفع شكلي · جاهز لربط Moyasar لاحقاً
-            </p>
-          </div>
-          <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-4">
-            <a href="/" className="flex items-center gap-2 text-xl font-bold text-soft-accent">
-              <span className="text-2xl">🌿</span> سوفت مومنت
-            </a>
-            <nav className="flex items-center gap-4 text-sm">
-              <a href="/book" className="text-salon-text hover:text-soft-accent">احجزي الآن</a>
-              <a href="/account" className="text-salon-text hover:text-soft-accent">حسابي</a>
-              <a href="/therapist" className="text-salon-text hover:text-soft-accent">الثيرابست</a>
-              <a href="/admin" className="text-salon-mauve hover:text-soft-accent">الإدارة</a>
-              <HeaderNotifications />
+        <header className="border-b border-sm-border">
+          <div className="mx-auto flex max-w-wide items-center justify-between px-6 py-6 md:px-10">
+            <Link href="/" className="text-lg font-medium tracking-wide text-sm-text md:text-xl">
+              Soft Moments
+            </Link>
+            <nav className="flex items-center gap-6 text-sm text-sm-muted">
+              <Link href="/" className="hover:text-sm-text">الرئيسية</Link>
+              <Link href="/admin" className="hover:text-sm-text">الإدارة</Link>
             </nav>
           </div>
         </header>
-        <main className="mx-auto max-w-6xl px-4 py-8">{children}</main>
-        <footer className="mt-12 border-t border-soft-blush/60 py-6 text-center text-sm text-salon-mauve">
-          سوفت مومنت — لحظة هدوء وجمال في بيتكِ © {new Date().getFullYear()}
+        <main>{children}</main>
+        <footer className="mt-24 border-t border-sm-border py-10 text-center text-sm text-sm-muted">
+          Soft Moments — الرياض
         </footer>
       </body>
     </html>
