@@ -8,25 +8,34 @@ import {
   useMemo,
   useState,
 } from "react";
-import type { CartItem } from "@/lib/types";
+import type { CartItem, Region } from "@/lib/types";
 
 const STORAGE_KEY = "soft-moments-cart";
 
-function loadCart(): CartItem[] {
-  if (typeof window === "undefined") return [];
+interface CartState {
+  items: CartItem[];
+  region: Region | "";
+}
+
+function loadCart(): CartState {
+  if (typeof window === "undefined") return { items: [], region: "" };
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw) as CartItem[];
-    return Array.isArray(parsed) ? parsed : [];
+    if (!raw) return { items: [], region: "" };
+    const parsed = JSON.parse(raw) as CartState | CartItem[];
+    if (Array.isArray(parsed)) return { items: parsed, region: "" };
+    return {
+      items: Array.isArray(parsed.items) ? parsed.items : [],
+      region: parsed.region ?? "",
+    };
   } catch {
-    return [];
+    return { items: [], region: "" };
   }
 }
 
-function saveCart(items: CartItem[]) {
+function saveCart(state: CartState) {
   if (typeof window === "undefined") return;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
 }
 
 function newLineId() {
@@ -35,7 +44,9 @@ function newLineId() {
 
 interface CartContextValue {
   items: CartItem[];
-  addItem: (item: Omit<CartItem, "lineId">) => void;
+  region: Region | "";
+  setRegion: (region: Region | "") => void;
+  addItem: (item: Omit<CartItem, "lineId" | "region">) => void;
   removeItem: (lineId: string) => void;
   clearCart: () => void;
   drawerOpen: boolean;
@@ -48,19 +59,26 @@ const CartContext = createContext<CartContextValue | null>(null);
 
 export function CartProvider({ children }: { children: React.ReactNode }) {
   const [items, setItems] = useState<CartItem[]>([]);
+  const [region, setRegionState] = useState<Region | "">("");
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [hydrated, setHydrated] = useState(false);
 
   useEffect(() => {
-    setItems(loadCart());
+    const loaded = loadCart();
+    setItems(loaded.items);
+    setRegionState(loaded.region);
     setHydrated(true);
   }, []);
 
   useEffect(() => {
-    if (hydrated) saveCart(items);
-  }, [items, hydrated]);
+    if (hydrated) saveCart({ items, region });
+  }, [items, region, hydrated]);
 
-  const addItem = useCallback((item: Omit<CartItem, "lineId">) => {
+  const setRegion = useCallback((r: Region | "") => {
+    setRegionState(r);
+  }, []);
+
+  const addItem = useCallback((item: Omit<CartItem, "lineId" | "region">) => {
     setItems((prev) => [...prev, { ...item, lineId: newLineId() }]);
   }, []);
 
@@ -70,11 +88,14 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
 
   const clearCart = useCallback(() => {
     setItems([]);
+    setRegionState("");
   }, []);
 
   const value = useMemo(
     () => ({
       items,
+      region,
+      setRegion,
       addItem,
       removeItem,
       clearCart,
@@ -83,7 +104,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
       closeDrawer: () => setDrawerOpen(false),
       count: items.length,
     }),
-    [items, addItem, removeItem, clearCart, drawerOpen],
+    [items, region, setRegion, addItem, removeItem, clearCart, drawerOpen],
   );
 
   return <CartContext.Provider value={value}>{children}</CartContext.Provider>;

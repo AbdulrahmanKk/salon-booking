@@ -3,7 +3,7 @@
  */
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
-import { BlobNotFoundError, get, put } from "@vercel/blob";
+import { BlobNotFoundError, del, get, put } from "@vercel/blob";
 import { join } from "path";
 import { randomUUID } from "crypto";
 import { asArray } from "./arrays";
@@ -337,6 +337,22 @@ async function readBookingFromBlob(id: string): Promise<BookingWithServices | nu
     }
     console.error("[blob-store] READ booking ERROR | id:", id, e);
     return null;
+  }
+}
+
+async function deleteBookingBlob(id: string): Promise<void> {
+  if (!shouldUseBlob()) return;
+  const path = bookingBlobPath(id);
+  try {
+    await del(path);
+    console.log("[blob-store] DELETE booking OK | id:", id, "| path:", path);
+  } catch (e) {
+    if (e instanceof BlobNotFoundError) {
+      console.log("[blob-store] DELETE booking NOT_FOUND | id:", id);
+      return;
+    }
+    console.error("[blob-store] DELETE booking ERROR | id:", id, e);
+    throw e;
   }
 }
 
@@ -1221,6 +1237,22 @@ export function updateBookingStatus(id: string, status: BookingStatus): Booking 
 
   persist();
   return b;
+}
+
+/** حذف حجز نهائياً من الذاكرة وVercel Blob */
+export async function deleteBooking(id: string): Promise<boolean> {
+  const s = store();
+  const idx = s.bookings.findIndex((b) => b.id === id);
+  if (idx === -1) return false;
+
+  s.bookings.splice(idx, 1);
+  if (s.bookingIndex) {
+    s.bookingIndex = s.bookingIndex.filter((x) => x !== id);
+  }
+  persist();
+  await deleteBookingBlob(id);
+  console.log("[deleteBooking] removed id:", id);
+  return true;
 }
 
 export function updateVisitStatus(

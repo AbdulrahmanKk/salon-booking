@@ -138,6 +138,17 @@ export default function AdminPanel() {
     if (res.ok) load();
   };
 
+  const removeBooking = async (id: string) => {
+    if (!window.confirm("هل أنت متأكد من حذف هذا الحجز؟")) return;
+    const res = await fetch(`/api/bookings/${id}`, { method: "DELETE" });
+    const data = await res.json();
+    if (!res.ok) {
+      setError(data.error ?? "فشل الحذف");
+      return;
+    }
+    setBookings((prev) => prev.filter((b) => b.id !== id));
+  };
+
   const saveManual = async () => {
     if (!mName || !mPhone || !mLocation || !mSelectedSlot || !mSelections.length) {
       setError("أكملي بيانات الحجز اليدوي");
@@ -338,11 +349,12 @@ export default function AdminPanel() {
                 <th className="p-3">إدارة</th>
                 <th className="p-3">ثيرابست</th>
                 <th className="p-3">الحالة</th>
+                <th className="p-3">حذف</th>
               </tr>
             </thead>
             <tbody>
               {bookings.length === 0 ? (
-                <tr><td colSpan={15} className="p-8 text-center text-salon-mauve">لا توجد حجوزات</td></tr>
+                <tr><td colSpan={16} className="p-8 text-center text-salon-mauve">لا توجد حجوزات</td></tr>
               ) : (
                 bookings.map((b) => (
                   <tr key={b.id} className="border-b border-salon-blush/60 hover:bg-salon-cream/50">
@@ -401,6 +413,15 @@ export default function AdminPanel() {
                           <option key={k} value={k}>{v}</option>
                         ))}
                       </select>
+                    </td>
+                    <td className="p-3">
+                      <button
+                        type="button"
+                        className="rounded-lg border border-red-200 px-2 py-1 text-xs text-red-700 hover:bg-red-50"
+                        onClick={() => removeBooking(b.id)}
+                      >
+                        حذف
+                      </button>
                     </td>
                   </tr>
                 ))

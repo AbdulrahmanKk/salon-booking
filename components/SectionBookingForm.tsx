@@ -33,7 +33,7 @@ export default function SectionBookingForm({ section }: Props) {
       .catch(() => {});
   }, []);
 
-  const handleAdd = (item: Omit<CartItem, "lineId">) => {
+  const handleAdd = (item: Omit<CartItem, "lineId" | "region">) => {
     const svc = services.find((s) => s.id === item.serviceId);
     addItem(item);
     setToast({

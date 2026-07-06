@@ -2,12 +2,10 @@
 
 import { useEffect, useState } from "react";
 import { asArray } from "@/lib/arrays";
-import type { CartItem, CatalogService, Region, ServiceAddon } from "@/lib/types";
-import { REGION_LABELS } from "@/lib/types";
+import { useCart } from "@/lib/cart-context";
+import type { CartItem, CatalogService, ServiceAddon } from "@/lib/types";
 import { cartHasBrideService, isBrideService } from "@/lib/service-helpers";
 import { riyadhDateKey } from "@/lib/scheduling";
-
-const REGIONS: Region[] = ["north", "south", "east", "west"];
 
 interface SlotOption {
   iso: string;
@@ -55,7 +53,7 @@ interface Props {
   addons: ServiceAddon[];
   catalog: CatalogService[];
   cart: CartItem[];
-  onConfirm: (item: Omit<CartItem, "lineId">) => void;
+  onConfirm: (item: Omit<CartItem, "lineId" | "region">) => void;
   onError: (message: string) => void;
   onCancel: () => void;
 }
@@ -69,11 +67,11 @@ export default function ServiceAddPanel({
   onError,
   onCancel,
 }: Props) {
+  const { region, openDrawer } = useCart();
   const bride = isBrideService(service);
   const [quantity, setQuantity] = useState(1);
   const [companions, setCompanions] = useState(0);
   const [selectedAddons, setSelectedAddons] = useState<string[]>([]);
-  const [region, setRegion] = useState<Region | "">("");
   const [selectedDate, setSelectedDate] = useState("");
   const [slots, setSlots] = useState<SlotOption[]>([]);
   const [selectedSlot, setSelectedSlot] = useState<string | null>(null);
@@ -93,7 +91,7 @@ export default function ServiceAddPanel({
       return;
     }
 
-    const draft: Omit<CartItem, "lineId"> = {
+    const draft: Omit<CartItem, "lineId" | "region"> = {
       serviceId: service.id,
       peopleCount: bride ? 1 : quantity,
       addonIds: selectedAddons,
@@ -137,7 +135,8 @@ export default function ServiceAddPanel({
       return;
     }
     if (!region) {
-      onError("اختاري المكان");
+      onError("حدّدي المنطقة من سلة التسوق أولاً");
+      openDrawer();
       return;
     }
     if (!selectedDate) {
@@ -154,7 +153,6 @@ export default function ServiceAddPanel({
       peopleCount: bride ? 1 : quantity,
       addonIds: selectedAddons,
       companionsCount: bride ? companions : undefined,
-      region,
       selectedDate,
       startTime: selectedSlot,
       therapistId,
@@ -201,25 +199,15 @@ export default function ServiceAddPanel({
         </div>
       )}
 
-      <div>
-        <p className="label">المكان</p>
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-          {REGIONS.map((r) => (
-            <button
-              key={r}
-              type="button"
-              onClick={() => setRegion(r)}
-              className={`border py-3 text-sm transition ${
-                region === r
-                  ? "border-sm-text bg-sm-text text-white"
-                  : "border-sm-border hover:border-sm-text"
-              }`}
-            >
-              {REGION_LABELS[r]}
-            </button>
-          ))}
-        </div>
-      </div>
+      {!region && (
+        <p className="text-sm text-sm-muted">
+          حدّدي المنطقة من{" "}
+          <button type="button" className="underline" onClick={openDrawer}>
+            سلة التسوق
+          </button>{" "}
+          قبل اختيار التاريخ والوقت.
+        </p>
+      )}
 
       <div>
         <label className="label" htmlFor={`date-${service.id}`}>

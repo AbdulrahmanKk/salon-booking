@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
+  deleteBooking,
   rescheduleBooking,
   transferTherapist,
   updateBookingStatus,
@@ -10,6 +11,7 @@ import { withStore } from "@/lib/with-store";
 
 export const dynamic = "force-dynamic";
 export const PATCH = withStore(handlePATCH);
+export const DELETE = withStore(handleDELETE);
 
 const VALID_STATUSES: BookingStatus[] = [
   "new",
@@ -56,5 +58,21 @@ async function handlePATCH(
   } catch (e) {
     const msg = e instanceof Error ? e.message : "خطأ";
     return NextResponse.json({ error: msg }, { status: 400 });
+  }
+}
+
+async function handleDELETE(
+  _request: NextRequest,
+  { params }: { params: { id: string } },
+) {
+  try {
+    const deleted = await deleteBooking(params.id);
+    if (!deleted) {
+      return NextResponse.json({ error: "الحجز غير موجود" }, { status: 404 });
+    }
+    return NextResponse.json({ ok: true });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : "خطأ";
+    return NextResponse.json({ error: msg }, { status: 500 });
   }
 }
