@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from "react";
 import { asArray } from "@/lib/arrays";
-import { useCart } from "@/lib/cart-context";
 import type { CartItem, CatalogService, ServiceAddon } from "@/lib/types";
 import { cartHasBrideService, isBrideService } from "@/lib/service-helpers";
 import { riyadhDateKey } from "@/lib/scheduling";
@@ -67,7 +66,6 @@ export default function ServiceAddPanel({
   onError,
   onCancel,
 }: Props) {
-  const { region, openDrawer } = useCart();
   const bride = isBrideService(service);
   const [quantity, setQuantity] = useState(1);
   const [companions, setCompanions] = useState(0);
@@ -84,7 +82,7 @@ export default function ServiceAddPanel({
   const hasAddons = Boolean(service.optional_addons && massageAddons.length > 0);
 
   useEffect(() => {
-    if (!region || !selectedDate) {
+    if (!selectedDate) {
       setSlots([]);
       setSelectedSlot(null);
       setTherapistId(null);
@@ -105,7 +103,7 @@ export default function ServiceAddPanel({
     fetch("/api/available-time", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ region, date: selectedDate, item: draft }),
+      body: JSON.stringify({ date: selectedDate, item: draft }),
     })
       .then((r) => r.json())
       .then((data) => {
@@ -127,16 +125,11 @@ export default function ServiceAddPanel({
         setSlots([]);
       })
       .finally(() => setLoadingSlots(false));
-  }, [region, selectedDate, quantity, companions, selectedAddons, service.id, bride, onError]);
+  }, [selectedDate, quantity, companions, selectedAddons, service.id, bride, onError]);
 
   const handleAdd = () => {
     if (bride && cartHasBrideService(cart, catalog)) {
       onError("لا يُسمح بأكثر من خدمة عروس في نفس الحجز");
-      return;
-    }
-    if (!region) {
-      onError("حدّدي المنطقة من سلة التسوق أولاً");
-      openDrawer();
       return;
     }
     if (!selectedDate) {
@@ -199,16 +192,6 @@ export default function ServiceAddPanel({
         </div>
       )}
 
-      {!region && (
-        <p className="text-sm text-sm-muted">
-          حدّدي المنطقة من{" "}
-          <button type="button" className="underline" onClick={openDrawer}>
-            سلة التسوق
-          </button>{" "}
-          قبل اختيار التاريخ والوقت.
-        </p>
-      )}
-
       <div>
         <label className="label" htmlFor={`date-${service.id}`}>
           التاريخ
@@ -221,11 +204,10 @@ export default function ServiceAddPanel({
           max={maxDate || undefined}
           value={selectedDate}
           onChange={(e) => setSelectedDate(e.target.value)}
-          disabled={!region}
         />
       </div>
 
-      {region && selectedDate && (
+      {selectedDate && (
         <div>
           <p className="label">الوقت</p>
           {loadingSlots && (

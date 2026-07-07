@@ -129,109 +129,104 @@ export default function CartDrawer() {
               <p className="text-xl font-light">تم تأكيد الحجز</p>
               <p className="text-sm text-sm-muted">سنتواصل معكِ قريباً</p>
             </div>
+          ) : items.length === 0 ? (
+            <p className="text-center text-sm text-sm-muted">السلة فارغة</p>
           ) : (
             <>
-              <div className={items.length ? "mb-6 border-b border-sm-border pb-6" : ""}>
-                <p className="label">المنطقة</p>
-                <div className="grid grid-cols-2 gap-2">
-                  {REGIONS.map((r) => (
-                    <button
-                      key={r}
-                      type="button"
-                      onClick={() => setRegion(r)}
-                      className={`border py-3 text-sm transition ${
-                        region === r
-                          ? "border-sm-text bg-sm-text text-white"
-                          : "border-sm-border hover:border-sm-text"
-                      }`}
-                    >
-                      {REGION_LABELS[r]}
-                    </button>
-                  ))}
+              <ul className="space-y-4 border-b border-sm-border pb-6">
+                {items.map((item) => {
+                  const svc = services.find((s) => s.id === item.serviceId);
+                  const bride = svc && isBrideService(svc);
+                  return (
+                    <li key={item.lineId} className="text-sm">
+                      <div className="flex justify-between gap-2">
+                        <span className="font-medium">{svc?.name ?? item.serviceId}</span>
+                        <button
+                          type="button"
+                          className="btn-ghost text-xs"
+                          onClick={() => removeItem(item.lineId)}
+                        >
+                          إزالة
+                        </button>
+                      </div>
+                      <p className="mt-1 text-sm-muted">
+                        {item.startTime
+                          ? formatDateTimeAr(new Date(item.startTime))
+                          : "— لم يُحدد الوقت"}
+                      </p>
+                      {!bride && item.peopleCount > 1 && (
+                        <p className="text-sm-muted">العدد: {item.peopleCount}</p>
+                      )}
+                      {bride && (item.companionsCount ?? 0) > 0 && (
+                        <p className="text-sm-muted">مرافقات: {item.companionsCount}</p>
+                      )}
+                      {region && linePrices[item.lineId] != null && (
+                        <p className="mt-1">{linePrices[item.lineId]} ر.س</p>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+
+              {region && total > 0 && (
+                <p className="mt-4 text-lg">
+                  الإجمالي: <span className="font-medium">{total} ر.س</span>
+                </p>
+              )}
+
+              <div className="mt-8 space-y-4">
+                <h3 className="text-sm font-medium text-sm-muted">بيانات التواصل</h3>
+                <input
+                  className="input-field"
+                  placeholder="الاسم"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                />
+                <input
+                  className="input-field"
+                  placeholder="05xxxxxxxx"
+                  dir="ltr"
+                  value={phone}
+                  onChange={(e) => setPhone(e.target.value)}
+                />
+                <input
+                  className="input-field"
+                  placeholder="رابط الموقع (Google Maps)"
+                  dir="ltr"
+                  value={locationUrl}
+                  onChange={(e) => setLocationUrl(e.target.value)}
+                />
+                <input
+                  className="input-field"
+                  placeholder="ملاحظات (اختياري)"
+                  value={customerNotes}
+                  onChange={(e) => setCustomerNotes(e.target.value)}
+                />
+                <div>
+                  <p className="label">المنطقة</p>
+                  <div className="grid grid-cols-2 gap-2">
+                    {REGIONS.map((r) => (
+                      <button
+                        key={r}
+                        type="button"
+                        onClick={() => setRegion(r)}
+                        className={`border py-3 text-sm transition ${
+                          region === r
+                            ? "border-sm-text bg-sm-text text-white"
+                            : "border-sm-border hover:border-sm-text"
+                        }`}
+                      >
+                        {REGION_LABELS[r]}
+                      </button>
+                    ))}
+                  </div>
                 </div>
               </div>
 
-              {items.length === 0 ? (
-                <p className="text-center text-sm text-sm-muted">السلة فارغة</p>
-              ) : (
-                <>
-                  <ul className="space-y-4 border-b border-sm-border pb-6">
-                    {items.map((item) => {
-                      const svc = services.find((s) => s.id === item.serviceId);
-                      const bride = svc && isBrideService(svc);
-                      return (
-                        <li key={item.lineId} className="text-sm">
-                          <div className="flex justify-between gap-2">
-                            <span className="font-medium">{svc?.name ?? item.serviceId}</span>
-                            <button
-                              type="button"
-                              className="btn-ghost text-xs"
-                              onClick={() => removeItem(item.lineId)}
-                            >
-                              إزالة
-                            </button>
-                          </div>
-                          <p className="mt-1 text-sm-muted">
-                            {item.startTime
-                              ? formatDateTimeAr(new Date(item.startTime))
-                              : "— لم يُحدد الوقت"}
-                          </p>
-                          {!bride && item.peopleCount > 1 && (
-                            <p className="text-sm-muted">العدد: {item.peopleCount}</p>
-                          )}
-                          {bride && (item.companionsCount ?? 0) > 0 && (
-                            <p className="text-sm-muted">مرافقات: {item.companionsCount}</p>
-                          )}
-                          {linePrices[item.lineId] != null && (
-                            <p className="mt-1">{linePrices[item.lineId]} ر.س</p>
-                          )}
-                        </li>
-                      );
-                    })}
-                  </ul>
-
-                  {total > 0 && (
-                    <p className="mt-4 text-lg">
-                      الإجمالي: <span className="font-medium">{total} ر.س</span>
-                    </p>
-                  )}
-
-                  <div className="mt-8 space-y-4">
-                    <h3 className="text-sm font-medium text-sm-muted">بيانات التواصل</h3>
-                    <input
-                      className="input-field"
-                      placeholder="الاسم"
-                      value={name}
-                      onChange={(e) => setName(e.target.value)}
-                    />
-                    <input
-                      className="input-field"
-                      placeholder="05xxxxxxxx"
-                      dir="ltr"
-                      value={phone}
-                      onChange={(e) => setPhone(e.target.value)}
-                    />
-                    <input
-                      className="input-field"
-                      placeholder="رابط الموقع (Google Maps)"
-                      dir="ltr"
-                      value={locationUrl}
-                      onChange={(e) => setLocationUrl(e.target.value)}
-                    />
-                    <input
-                      className="input-field"
-                      placeholder="ملاحظات (اختياري)"
-                      value={customerNotes}
-                      onChange={(e) => setCustomerNotes(e.target.value)}
-                    />
-                  </div>
-
-                  {error && (
-                    <p className="mt-4 border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-                      {error}
-                    </p>
-                  )}
-                </>
+              {error && (
+                <p className="mt-4 border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+                  {error}
+                </p>
               )}
             </>
           )}

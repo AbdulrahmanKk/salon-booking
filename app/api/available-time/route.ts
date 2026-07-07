@@ -17,13 +17,13 @@ async function handlePOST(request: NextRequest) {
   try {
     const body = await request.json();
     const { region, date, item } = body as {
-      region: Region;
+      region?: Region;
       date: string;
       item: CartItem;
     };
 
-    if (!region || !date || !item?.serviceId) {
-      return NextResponse.json({ error: "المنطقة والتاريخ والخدمة مطلوبة" }, { status: 400 });
+    if (!date || !item?.serviceId) {
+      return NextResponse.json({ error: "التاريخ والخدمة مطلوبة" }, { status: 400 });
     }
 
     const settings = getSettings();
@@ -33,7 +33,7 @@ async function handlePOST(request: NextRequest) {
       return NextResponse.json({ error: "التاريخ خارج نطاق الحجز المتاح" }, { status: 400 });
     }
 
-    const result = getSlotsForCartItem(region, item, date);
+    const result = getSlotsForCartItem(region ?? "north", item, date);
 
     return NextResponse.json({
       slots: result.slots.map((s) => ({
