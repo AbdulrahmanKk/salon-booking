@@ -7,7 +7,6 @@ import { inferBookingScheduleGroup } from "@/lib/schedule-groups";
 import type { BookingStatus, BookingWithServices, CatalogService, Region, ServiceCategory, ServiceSelection, Therapist } from "@/lib/types";
 import { CATEGORY_LABELS, REGION_LABELS } from "@/lib/types";
 import AdminBookingsTable from "./AdminBookingsTable";
-import AdminPromotions from "./AdminPromotions";
 import NotificationCenter from "./NotificationCenter";
 
 const REGIONS: Region[] = ["north", "south", "east", "west"];
@@ -19,14 +18,20 @@ interface SlotOption {
   dateLabel: string;
 }
 
-type AdminTab = "bookings" | "promotions";
+type AdminTab = "khulood" | "sarah" | "salon";
+
+const TABLE_TABS: { id: AdminTab; label: string; title: string }[] = [
+  { id: "khulood", label: "جدول خلود", title: "جدول خلود (حجوزات المكياج — خلود الهداب)" },
+  { id: "sarah", label: "جدول سارة", title: "جدول سارة (حجوزات الشعر — سارة الهداب)" },
+  { id: "salon", label: "جدول الصالون", title: "جدول الصالون (حجوزات الأظافر والمساج)" },
+];
 
 export default function AdminPanel() {
   const [bookings, setBookings] = useState<BookingWithServices[]>([]);
   const [services, setServices] = useState<CatalogService[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [tab, setTab] = useState<AdminTab>("bookings");
+  const [tab, setTab] = useState<AdminTab>("khulood");
   const [therapists, setTherapists] = useState<Therapist[]>([]);
   const [showManual, setShowManual] = useState(false);
   const [showCompleted, setShowCompleted] = useState(false);
@@ -245,31 +250,23 @@ export default function AdminPanel() {
       </div>
 
       <div className="flex flex-wrap gap-2">
-        <button
-          type="button"
-          className={tab === "bookings" ? "btn-primary" : "btn-secondary"}
-          onClick={() => setTab("bookings")}
-        >
-          الحجوزات
-        </button>
-        <button
-          type="button"
-          className={tab === "promotions" ? "btn-primary" : "btn-secondary"}
-          onClick={() => setTab("promotions")}
-        >
-          العروض
-        </button>
+        {TABLE_TABS.map((t) => (
+          <button
+            key={t.id}
+            type="button"
+            className={tab === t.id ? "btn-primary" : "btn-secondary"}
+            onClick={() => setTab(t.id)}
+          >
+            {t.label}
+          </button>
+        ))}
       </div>
 
       {error && (
         <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-red-700">{error}</div>
       )}
 
-      {tab === "promotions" ? (
-        <AdminPromotions />
-      ) : (
-        <>
-          <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
             <p className="text-sm text-salon-mauve">
               {showCompleted
                 ? "الحجوزات المنتهية — يمكنك إرجاعها بتغيير الحالة"
@@ -380,42 +377,21 @@ export default function AdminPanel() {
             </div>
           )}
 
-          <div className="space-y-10">
-            <AdminBookingsTable
-              title="جدول خلود (حجوزات المكياج — خلود الهداب)"
-              bookings={partitioned.khulood}
-              therapists={therapists}
-              formatCategories={formatCategories}
-              onReschedule={reschedule}
-              onTransfer={transfer}
-              onStatusChange={updateStatus}
-              onHide={hideBookingRow}
-              onDelete={removeBooking}
-            />
-            <AdminBookingsTable
-              title="جدول سارة (حجوزات الشعر — سارة الهداب)"
-              bookings={partitioned.sarah}
-              therapists={therapists}
-              formatCategories={formatCategories}
-              onReschedule={reschedule}
-              onTransfer={transfer}
-              onStatusChange={updateStatus}
-              onHide={hideBookingRow}
-              onDelete={removeBooking}
-            />
-            <AdminBookingsTable
-              title="جدول الصالون (حجوزات الأظافر والمساج)"
-              bookings={partitioned.salon}
-              therapists={therapists}
-              formatCategories={formatCategories}
-              onReschedule={reschedule}
-              onTransfer={transfer}
-              onStatusChange={updateStatus}
-              onHide={hideBookingRow}
-              onDelete={removeBooking}
-            />
-          </div>
-        </>
+      {TABLE_TABS.map((t) =>
+        tab === t.id ? (
+          <AdminBookingsTable
+            key={t.id}
+            title={t.title}
+            bookings={partitioned[t.id]}
+            therapists={therapists}
+            formatCategories={formatCategories}
+            onReschedule={reschedule}
+            onTransfer={transfer}
+            onStatusChange={updateStatus}
+            onHide={hideBookingRow}
+            onDelete={removeBooking}
+          />
+        ) : null,
       )}
     </div>
   );
