@@ -359,13 +359,8 @@ async function deleteBookingBlob(id: string): Promise<void> {
 async function writeToBlob(data: StoreData): Promise<void> {
   const hasToken = Boolean(process.env.BLOB_READ_WRITE_TOKEN?.trim());
 
-  const fresh = await readFromBlob();
-  if (fresh?.bookings.length) {
-    data.bookings = mergeBookingsById(data.bookings, fresh.bookings);
-    data.bookingIndex = Array.from(
-      new Set([...asArray<string>(data.bookingIndex), ...data.bookings.map((b) => b.id)]),
-    );
-  }
+  // الذاكرة الحالية مصدر الحقيقة — لا نعيد استيراد حجوزات حُذفت من القائمة
+  data.bookingIndex = Array.from(new Set(data.bookings.map((b) => b.id)));
 
   const payload = JSON.stringify(data);
   const ids = data.bookings.map((b) => b.id);
@@ -422,21 +417,30 @@ function mergeBookingsById(
 /** استعادة حجوزات موجودة في الفهرس/ملفات Blob لكن ناقصة من store.json */
 async function reconcileBookingsFromIndex(): Promise<void> {
   const s = store();
-  const index = Array.from(new Set([...asArray<string>(s.bookingIndex), ...s.bookings.map((b) => b.id)]));
-  s.bookingIndex = index;
+  const knownIds = new Set(s.bookings.map((b) => b.id));
 
+  if (!shouldUseBlob()) {
+    s.bookingIndex = s.bookings.map((b) => b.id);
+    return;
+  }
+
+  const blobData = await readFromBlob();
+  const blobIndex = asArray<string>(blobData?.bookingIndex);
   let restored = 0;
-  for (const id of index) {
-    if (s.bookings.some((b) => b.id === id)) continue;
-    if (!shouldUseBlob()) continue;
+
+  for (const id of blobIndex) {
+    if (knownIds.has(id)) continue;
     const fromBlob = await readBookingFromBlob(id);
     if (fromBlob) {
       s.bookings.push(fromBlob);
+      knownIds.add(id);
       restored += 1;
       console.log("[reconcileBookings] restored from booking file | id:", id);
       logBookingCategorySnapshot("reconcile", fromBlob, s.services);
     }
   }
+
+  s.bookingIndex = s.bookings.map((b) => b.id);
   if (restored > 0) persist();
 }
 
@@ -1241,17 +1245,61 @@ export function updateBookingStatus(id: string, status: BookingStatus): Booking 
 
 /** حذف حجز نهائياً من الذاكرة وVercel Blob */
 export async function deleteBooking(id: string): Promise<boolean> {
+  const key = id?.trim();
+  if (!key) return false;
+
   const s = store();
-  const idx = s.bookings.findIndex((b) => b.id === id);
+  const idx = s.bookings.findIndex((b) => b.id === key);
   if (idx === -1) return false;
 
+  const beforeCount = s.bookings.length;
   s.bookings.splice(idx, 1);
-  if (s.bookingIndex) {
-    s.bookingIndex = s.bookingIndex.filter((x) => x !== id);
+  s.bookingIndex = s.bookings.map((b) => b.id);
+
+  console.log(
+    "[deleteBooking] START | id:",
+    key,
+    "| bookings:",
+    beforeCount,
+    "→",
+    s.bookings.length,
+  );
+
+  if (shouldUseBlob()) {
+    await deleteBookingBlob(key);
+    await writeToBlob(s);
+    dirty = false;
+
+    const readBack = await readFromBlob();
+    const stillInStore = readBack?.bookings.some((b) => b.id === key) ?? false;
+    const stillInIndex = asArray(readBack?.bookingIndex).includes(key);
+    console.log(
+      "[deleteBooking] VERIFY blob | id:",
+      key,
+      "| path:",
+      BLOB_STORE_PATH,
+      "| stillInStore:",
+      stillInStore,
+      "| stillInIndex:",
+      stillInIndex,
+      "| storeBookings:",
+      readBack?.bookings.length ?? 0,
+    );
+    if (stillInStore || stillInIndex) {
+      throw new Error("فشل حذف الحجز من ملف التخزين السحابي");
+    }
+    console.log("[deleteBooking] OK blob | id:", key, "| deleted from store + booking file");
+  } else {
+    saveToFile(s);
+    dirty = false;
+    console.log(
+      "[deleteBooking] OK file | id:",
+      key,
+      "| remaining:",
+      s.bookings.length,
+    );
   }
-  persist();
-  await deleteBookingBlob(id);
-  console.log("[deleteBooking] removed id:", id);
+
   return true;
 }
 

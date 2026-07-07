@@ -146,7 +146,7 @@ export default function AdminPanel() {
       setError(data.error ?? "فشل الحذف");
       return;
     }
-    setBookings((prev) => prev.filter((b) => b.id !== id));
+    await load();
   };
 
   const saveManual = async () => {
