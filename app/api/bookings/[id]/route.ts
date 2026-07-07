@@ -72,11 +72,11 @@ async function handleDELETE(
     }
     return NextResponse.json({ ok: true });
   } catch (e) {
-    console.error("[bookings/DELETE] ERROR | id:", params.id, "|", e);
-    const msg =
+    const detail =
       e instanceof Error
         ? `${e.message}${e.stack ? `\n${e.stack}` : ""}`
-        : String(e);
-    return NextResponse.json({ error: msg }, { status: 500 });
+        : JSON.stringify(e, Object.getOwnPropertyNames(e as object));
+    console.error("[bookings/DELETE] ERROR | id:", params.id, "| detail:", detail);
+    return NextResponse.json({ error: detail }, { status: 500 });
   }
 }

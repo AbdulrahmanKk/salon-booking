@@ -3,7 +3,7 @@
  */
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
-import { BlobNotFoundError, del, get, list, put } from "@vercel/blob";
+import { BlobNotFoundError, get, list, put } from "@vercel/blob";
 import { join } from "path";
 import { randomUUID } from "crypto";
 import { asArray } from "./arrays";
@@ -273,19 +273,55 @@ function formatBlobError(e: unknown): string {
   return String(e);
 }
 
-async function resolveBlobUrl(pathname: string): Promise<string | null> {
+async function fetchPrivateBlobText(url: string): Promise<string> {
+  const token = process.env.BLOB_READ_WRITE_TOKEN?.trim();
+  const headers: Record<string, string> = {};
+  if (token) headers.Authorization = `Bearer ${token}`;
+
+  const res = await fetch(url, { headers, cache: "no-store" });
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error(`blob fetch failed status=${res.status} url=${url} body=${body.slice(0, 500)}`);
+  }
+  return res.text();
+}
+
+/** قراءة store.json عبر list()+fetch — النمط الموثوق للمخزن Private */
+async function readStoreViaList(): Promise<StoreData | null> {
+  console.log("[blob-store] READ store via list START | path:", BLOB_STORE_PATH);
   try {
-    const { blobs } = await list({ prefix: pathname, limit: 10 });
-    const exact = blobs.find((b) => b.pathname === pathname);
-    return exact?.url ?? blobs[0]?.url ?? null;
+    const { blobs } = await list({ prefix: "soft-moment/", limit: 100 });
+    const match =
+      blobs.find((b) => b.pathname === BLOB_STORE_PATH) ??
+      blobs.find((b) => b.pathname.endsWith("/store.json"));
+    if (!match?.url) {
+      console.log("[blob-store] READ store via list MISS | path:", BLOB_STORE_PATH);
+      return null;
+    }
+    const text = await fetchPrivateBlobText(match.url);
+    const data = migrateStore(JSON.parse(text) as Partial<StoreData>);
+    console.log(
+      "[blob-store] READ store via list OK | path:",
+      match.pathname,
+      "| bookings:",
+      data.bookings.length,
+      "| ids:",
+      data.bookings.map((b) => b.id),
+    );
+    return data;
   } catch (e) {
-    console.warn("[blob-store] list for delete failed | path:", pathname, "|", formatBlobError(e));
+    console.error("[blob-store] READ store via list ERROR |", formatBlobError(e));
     return null;
   }
 }
 
 async function readFromBlob(): Promise<StoreData | null> {
-  console.log("[blob-store] READ store START | path:", BLOB_STORE_PATH);
+  if (shouldUseBlob()) {
+    const viaList = await readStoreViaList();
+    if (viaList) return viaList;
+  }
+
+  console.log("[blob-store] READ store via get START | path:", BLOB_STORE_PATH);
   try {
     const result = await get(BLOB_STORE_PATH, { access: "private" });
     if (!result || result.statusCode !== 200 || !result.stream) {
@@ -366,42 +402,12 @@ async function readBookingFromBlob(id: string): Promise<BookingWithServices | nu
   }
 }
 
-async function deleteBookingBlob(id: string): Promise<void> {
-  if (!shouldUseBlob()) return;
-  const path = bookingBlobPath(id);
-  const targets = [path];
-  const url = await resolveBlobUrl(path);
-  if (url && !targets.includes(url)) targets.push(url);
-
-  for (const target of targets) {
-    try {
-      await del(target);
-      console.log("[blob-store] DELETE booking OK | id:", id, "| target:", target);
-      return;
-    } catch (e) {
-      if (e instanceof BlobNotFoundError) {
-        console.log("[blob-store] DELETE booking NOT_FOUND | id:", id, "| target:", target);
-        return;
-      }
-      console.warn(
-        "[blob-store] DELETE booking attempt failed | id:",
-        id,
-        "| target:",
-        target,
-        "|",
-        formatBlobError(e),
-      );
-    }
-  }
-  console.warn("[blob-store] DELETE booking skipped (non-fatal) | id:", id, "| path:", path);
-}
-
-async function verifyBookingRemovedFromBlob(id: string, maxAttempts = 10): Promise<boolean> {
+async function verifyBookingRemovedFromBlob(id: string, maxAttempts = 12): Promise<boolean> {
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     if (attempt > 0) {
-      await new Promise((r) => setTimeout(r, 250 * attempt));
+      await new Promise((r) => setTimeout(r, 300 * attempt));
     }
-    const readBack = await readFromBlob();
+    const readBack = (await readStoreViaList()) ?? (await readFromBlob());
     const stillInStore = readBack?.bookings.some((b) => b.id === id) ?? false;
     const stillInIndex = asArray(readBack?.bookingIndex).includes(id);
     if (!stillInStore && !stillInIndex) {
@@ -417,12 +423,14 @@ async function verifyBookingRemovedFromBlob(id: string, maxAttempts = 10): Promi
       stillInStore,
       "| stillInIndex:",
       stillInIndex,
+      "| bookings:",
+      readBack?.bookings.length ?? 0,
     );
   }
   return false;
 }
 
-async function writeToBlob(data: StoreData, options?: { skipBookingFiles?: boolean }): Promise<void> {
+async function writeToBlob(data: StoreData, options?: { skipBookingFiles?: boolean }): Promise<{ pathname: string }> {
   const hasToken = Boolean(process.env.BLOB_READ_WRITE_TOKEN?.trim());
 
   // الذاكرة الحالية مصدر الحقيقة — لا نعيد استيراد حجوزات حُذفت من القائمة
@@ -462,6 +470,8 @@ async function writeToBlob(data: StoreData, options?: { skipBookingFiles?: boole
       await writeBookingBlob(booking);
     }
   }
+
+  return { pathname: result.pathname };
 }
 
 function store(): MemoryStore {
@@ -1326,34 +1336,41 @@ export async function deleteBooking(id: string): Promise<boolean> {
 
   if (shouldUseBlob()) {
     try {
-      const fresh = await readFromBlob();
-      if (fresh) {
-        fresh.bookings = fresh.bookings.filter((b) => b.id !== key);
-        fresh.bookingIndex = fresh.bookings.map((b) => b.id);
-        s.bookings = fresh.bookings;
-        s.bookingIndex = fresh.bookingIndex;
-        await writeToBlob(fresh, { skipBookingFiles: true });
-      } else {
-        s.bookings = s.bookings.filter((b) => b.id !== key);
-        s.bookingIndex = s.bookings.map((b) => b.id);
-        await writeToBlob(s, { skipBookingFiles: true });
+      const fresh = (await readStoreViaList()) ?? (await readFromBlob());
+      if (!fresh) {
+        throw new Error("تعذر قراءة ملف التخزين السحابي عبر list+fetch");
       }
+
+      if (!fresh.bookings.some((b) => b.id === key) && !s.bookings.some((b) => b.id === key)) {
+        return false;
+      }
+
+      fresh.bookings = fresh.bookings.filter((b) => b.id !== key);
+      fresh.bookingIndex = fresh.bookings.map((b) => b.id);
+
+      s.bookings = fresh.bookings;
+      s.bookingIndex = fresh.bookingIndex;
+
+      const putResult = await writeToBlob(fresh, { skipBookingFiles: true });
       dirty = false;
 
       console.log(
-        "[deleteBooking] WRITE store | id:",
+        "[deleteBooking] WRITE store OK | id:",
         key,
+        "| pathname:",
+        putResult.pathname,
         "| bookings:",
         beforeCount,
         "→",
-        s.bookings.length,
+        fresh.bookings.length,
       );
-
-      await deleteBookingBlob(key);
 
       const verified = await verifyBookingRemovedFromBlob(key);
       if (!verified) {
-        throw new Error("فشل حذف الحجز من ملف التخزين السحابي");
+        const lastRead = (await readStoreViaList()) ?? (await readFromBlob());
+        throw new Error(
+          `فشل حذف الحجز من ملف التخزين السحابي | putPath=${putResult.pathname} | stillInStore=${lastRead?.bookings.some((b) => b.id === key) ?? "?"} | bookings=${lastRead?.bookings.length ?? "?"}`,
+        );
       }
       console.log("[deleteBooking] OK blob | id:", key);
     } catch (e) {
