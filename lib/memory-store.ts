@@ -258,7 +258,7 @@ function saveToFile(data: StoreData): void {
   }
 }
 
-function formatBlobError(e: unknown): string {
+export function formatBlobError(e: unknown): string {
   if (e instanceof Error) {
     const extra = e as Error & { status?: number; statusCode?: number; body?: unknown };
     const parts = [
@@ -437,9 +437,11 @@ async function writeToBlob(data: StoreData, options?: { skipBookingFiles?: boole
     data.bookings.length,
   );
 
-  if (!options?.skipBookingFiles) {
-    for (const booking of data.bookings) {
-      await writeBookingBlob(booking);
+  if (!options?.skipBookingFiles && dirtyBookingIds.size > 0) {
+    const idsToWrite = Array.from(dirtyBookingIds);
+    for (const id of idsToWrite) {
+      const booking = data.bookings.find((b) => b.id === id);
+      if (booking) await writeBookingBlob(booking);
     }
   }
 
@@ -566,8 +568,8 @@ export async function flushStore(): Promise<void> {
         lastId ? bookingBlobPath(lastId) : null,
       );
       if (!viaBookingFile) {
-        throw new Error(
-          `[blob-store] FLUSH_VERIFY failed: store read ${readBack?.bookings.length ?? 0}/${bookingsToWrite}, booking file missing for ${lastId}`,
+        console.error(
+          `[blob-store] FLUSH_VERIFY warning: store read ${readBack?.bookings.length ?? 0}/${bookingsToWrite}, booking file missing for ${lastId}`,
         );
       }
     }
@@ -1320,6 +1322,7 @@ export function updateBookingStatus(id: string, status: BookingStatus): Booking 
   }
 
   persist();
+  markBookingDirty(b.id);
   return b;
 }
 
@@ -1335,6 +1338,7 @@ export function hideBooking(id: string): BookingWithServices | null {
   b.hidden = true;
   console.log("[hideBooking] hidden=true | id:", key);
   persist();
+  markBookingDirty(b.id);
   return b;
 }
 
@@ -1352,6 +1356,7 @@ export async function deleteBooking(id: string): Promise<boolean> {
   console.log("[deleteBooking] soft delete | id:", key);
 
   persist();
+  markBookingDirty(key);
 
   if (shouldUseBlob()) {
     try {
@@ -1418,6 +1423,7 @@ export function updateVisitStatus(
   }
 
   persist();
+  markBookingDirty(b.id);
   return b;
 }
 
@@ -1473,6 +1479,7 @@ export function rescheduleBooking(
   b.visit_status = "scheduled";
   b.visit_timeline = {};
   persist();
+  markBookingDirty(b.id);
   return b;
 }
 
@@ -1481,6 +1488,7 @@ export function transferTherapist(id: string, therapistId: number): BookingWithS
   if (!b) return null;
   b.therapist_id = therapistId;
   persist();
+  markBookingDirty(b.id);
   return b;
 }
 

@@ -33,7 +33,12 @@ const SERVICE_GROUP: Record<string, ScheduleGroup> = {
 export function scheduleGroupForServiceId(serviceId: string, catalog?: CatalogService[]): ScheduleGroup | null {
   const svc = catalog?.find((s) => s.id === serviceId);
   if (svc?.schedule_group) return svc.schedule_group;
-  return SERVICE_GROUP[serviceId] ?? null;
+  const mapped = SERVICE_GROUP[serviceId];
+  if (mapped) return mapped;
+  if (svc?.category === "makeup") return "khulood";
+  if (svc?.category === "hair") return "sarah";
+  if (svc?.category === "nails" || svc?.category === "massage") return "nails-massage";
+  return null;
 }
 
 export function resolveScheduleGroupFromCart(

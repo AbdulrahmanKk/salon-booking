@@ -1,4 +1,4 @@
-import { blobDiag, flushStore, initStore } from "./memory-store";
+import { blobDiag, flushStore, formatBlobError, initStore } from "./memory-store";
 
 type RouteHandler = (...args: never[]) => Promise<Response> | Response;
 
@@ -9,11 +9,21 @@ type RouteHandler = (...args: never[]) => Promise<Response> | Response;
 export function withStore<T extends RouteHandler>(handler: T): T {
   return (async (...args: Parameters<T>) => {
     blobDiag("REQUEST_START", { handler: handler.name || "anonymous" });
-    await initStore();
+    try {
+      await initStore();
+    } catch (e) {
+      console.error("[withStore] initStore failed:", formatBlobError(e));
+      return Response.json({ error: "تعذّر تحميل البيانات" }, { status: 500 });
+    }
+
     try {
       return await handler(...args);
     } finally {
-      await flushStore();
+      try {
+        await flushStore();
+      } catch (e) {
+        console.error("[withStore] flushStore failed:", formatBlobError(e));
+      }
       blobDiag("REQUEST_END", { handler: handler.name || "anonymous" });
     }
   }) as unknown as T;

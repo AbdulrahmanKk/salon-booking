@@ -83,6 +83,11 @@ async function handlePOST(request: NextRequest) {
 
     return NextResponse.json({ booking, amountHalala });
   } catch (e) {
+    const detail =
+      e instanceof Error
+        ? `${e.message}${e.stack ? `\n${e.stack}` : ""}`
+        : JSON.stringify(e, Object.getOwnPropertyNames(e as object));
+    console.error("[bookings/POST] ERROR |", detail);
     const msg = e instanceof Error ? e.message : "خطأ في إنشاء الحجز";
     return NextResponse.json({ error: msg }, { status: 500 });
   }

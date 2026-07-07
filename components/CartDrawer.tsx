@@ -90,8 +90,16 @@ export default function CartDrawer() {
             therapistId: item.therapistId,
           }),
         });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error);
+        const raw = await res.text();
+        let data: { error?: string } = {};
+        if (raw) {
+          try {
+            data = JSON.parse(raw) as { error?: string };
+          } catch {
+            throw new Error(`استجابة غير صالحة من الخادم (${res.status})`);
+          }
+        }
+        if (!res.ok) throw new Error(data.error || `فشل الحجز (${res.status})`);
       }
       clearCart();
       setDone(true);
