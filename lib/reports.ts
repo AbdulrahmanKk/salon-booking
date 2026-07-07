@@ -129,7 +129,8 @@ export function getBookingsForTherapistToday(
         b.therapist_id === therapistId &&
         dateKeyRiyadh(b.start_time) === today &&
         b.status !== "cancelled" &&
-        b.deleted !== true,
+        b.deleted !== true &&
+        b.status !== "completed",
     )
     .sort((a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime());
 }

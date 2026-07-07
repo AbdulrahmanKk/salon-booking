@@ -40,19 +40,27 @@ export default function AdminPanel() {
   const [mSelectedSlot, setMSelectedSlot] = useState("");
   const [mSaving, setMSaving] = useState(false);
 
+  const [showCompleted, setShowCompleted] = useState(false);
+  const [calendarBookings, setCalendarBookings] = useState<BookingWithServices[]>([]);
+
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [bRes, sRes, tRes] = await Promise.all([
+      const scope = showCompleted ? "completed" : "active";
+      const [bRes, activeRes, sRes, tRes] = await Promise.all([
+        fetch(`/api/bookings?scope=${scope}`),
         fetch("/api/bookings"),
         fetch("/api/services"),
         fetch("/api/therapist?id=1"),
       ]);
       const bData = await bRes.json();
+      const activeData = await activeRes.json();
       const sData = await sRes.json();
       const tData = await tRes.json();
       if (!bRes.ok) throw new Error(bData.error);
+      if (!activeRes.ok) throw new Error(activeData.error);
       const safeBookings = asArray<BookingWithServices>(bData);
+      const safeActive = asArray<BookingWithServices>(activeData);
       const safeServices = asArray<CatalogService>(sData.services ?? sData);
       for (const b of safeBookings) {
         const isHair = b.services?.some(
@@ -69,6 +77,7 @@ export default function AdminPanel() {
         safeBookings.filter((b) => bookingServiceCategories(b, safeServices).includes("hair")).length,
       );
       setBookings(safeBookings);
+      setCalendarBookings(safeActive);
       setServices(safeServices);
       setTherapists(asArray<Therapist>(tData.therapists));
       const init: Record<string, number> = {};
@@ -80,7 +89,7 @@ export default function AdminPanel() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [showCompleted]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -115,7 +124,17 @@ export default function AdminPanel() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ status }),
     });
-    if (res.ok) load();
+    if (!res.ok) return;
+    if (status === "completed" && !showCompleted) {
+      setBookings((prev) => prev.filter((b) => b.id !== id));
+      setCalendarBookings((prev) => prev.filter((b) => b.id !== id));
+      return;
+    }
+    if (status !== "completed" && showCompleted) {
+      setBookings((prev) => prev.filter((b) => b.id !== id));
+      return;
+    }
+    load();
   };
 
   const reschedule = async (id: string, startTime: string) => {
@@ -315,12 +334,12 @@ export default function AdminPanel() {
 
       {tab === "calendar" ? (
         <AdminCalendar
-          bookings={bookings}
+          bookings={calendarBookings}
           onAddManual={() => setShowManual(true)}
           onRefresh={load}
         />
       ) : tab === "map" ? (
-        <AdminMap bookings={bookings} />
+        <AdminMap bookings={calendarBookings} />
       ) : tab === "reports" ? (
         <AdminReports />
       ) : tab === "gifts" ? (
@@ -330,6 +349,19 @@ export default function AdminPanel() {
       ) : tab === "settings" ? (
         <AdminSettings />
       ) : (
+        <div className="space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <p className="text-sm text-salon-mauve">
+              {showCompleted ? "الحجوزات المنتهية — يمكنك إرجاعها بتغيير الحالة" : "الحجوزات النشطة فقط"}
+            </p>
+            <button
+              type="button"
+              className={showCompleted ? "btn-primary" : "btn-secondary"}
+              onClick={() => setShowCompleted((v) => !v)}
+            >
+              {showCompleted ? "عرض النشطة" : "عرض المنتهية"}
+            </button>
+          </div>
         <div className="card overflow-x-auto p-0">
           <table className="w-full min-w-[1000px] text-sm">
             <thead>
@@ -428,6 +460,7 @@ export default function AdminPanel() {
               )}
             </tbody>
           </table>
+        </div>
         </div>
       )}
     </div>

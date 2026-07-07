@@ -890,7 +890,7 @@ export function getCustomerPackages(phone: string): CustomerPackage[] {
 export function getCustomerAccount(phone: string): CustomerAccount {
   const key = normalizePhone(phone);
   const bookings = store().bookings
-    .filter((b) => phonesMatch(b.customer_phone, key) && !isBookingDeleted(b))
+    .filter((b) => phonesMatch(b.customer_phone, key) && !isBookingDeleted(b) && b.status !== "completed")
     .sort((a, b) => new Date(b.start_time).getTime() - new Date(a.start_time).getTime());
   const transactions = store()
     .walletTransactions.filter((t) => phonesMatch(t.phone, key))
@@ -994,10 +994,21 @@ function isBookingDeleted(b: { deleted?: boolean }): boolean {
   return b.deleted === true;
 }
 
+export type BookingsListScope = "active" | "completed";
+
+function filterBookingsByScope(
+  bookings: BookingWithServices[],
+  scope: BookingsListScope,
+): BookingWithServices[] {
+  const visible = bookings.filter((b) => !isBookingDeleted(b));
+  if (scope === "completed") {
+    return visible.filter((b) => b.status === "completed");
+  }
+  return visible.filter((b) => b.status !== "completed");
+}
+
 export function getBookingsForSchedule(): BookingForSchedule[] {
-  const catalog = store().services;
-  return store()
-    .bookings.filter((b) => !isBookingDeleted(b))
+  return filterBookingsByScope(store().bookings, "active")
     .map((b) => ({
     id: b.id,
     therapist_id: b.therapist_id,
@@ -1011,11 +1022,9 @@ export function getBookingsForSchedule(): BookingForSchedule[] {
   }));
 }
 
-export function getAllBookings(): BookingWithServices[] {
+export function getAllBookings(scope: BookingsListScope = "active"): BookingWithServices[] {
   const catalog = store().services;
-  const sorted = store()
-    .bookings.filter((b) => !isBookingDeleted(b))
-    .sort(
+  const sorted = filterBookingsByScope(store().bookings, scope).sort(
     (a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime(),
   );
   for (const b of sorted) {
@@ -1028,7 +1037,10 @@ export function getAllBookings(): BookingWithServices[] {
 }
 
 export function getBookingsByPhone(phone: string): BookingWithServices[] {
-  return store().bookings.filter((b) => phonesMatch(b.customer_phone, phone) && !isBookingDeleted(b));
+  return filterBookingsByScope(
+    store().bookings.filter((b) => phonesMatch(b.customer_phone, phone)),
+    "active",
+  );
 }
 
 export function createBooking(input: {
@@ -1485,7 +1497,7 @@ export function getRatingForBooking(bookingId: string): BookingRating | null {
 
 export function getReportsSummary(): ReportsSummary {
   return buildReports(
-    store().bookings.filter((b) => !isBookingDeleted(b)),
+    filterBookingsByScope(store().bookings, "active"),
     store().ratings,
     store().therapists,
   );
@@ -1493,7 +1505,7 @@ export function getReportsSummary(): ReportsSummary {
 
 export function getTherapistTodayBookings(therapistId: number): BookingWithServices[] {
   return getBookingsForTherapistToday(
-    store().bookings.filter((b) => !isBookingDeleted(b)),
+    filterBookingsByScope(store().bookings, "active"),
     therapistId,
   );
 }

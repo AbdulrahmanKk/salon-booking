@@ -31,7 +31,12 @@ export function sortActiveBookings(
   bookings: BookingForSchedule[] | null | undefined,
 ): BookingForSchedule[] {
   return asArray<BookingForSchedule>(bookings)
-    .filter((b) => b.status !== "cancelled" && b.deleted !== true)
+    .filter(
+      (b) =>
+        b.status !== "cancelled" &&
+        b.status !== "completed" &&
+        b.deleted !== true,
+    )
     .sort((a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime());
 }
 
@@ -87,7 +92,11 @@ export function isSlotValidForTherapist(
   excludeBookingId?: string,
 ): boolean {
   const active = therapistBookings.filter(
-    (b) => b.id !== excludeBookingId && b.status !== "cancelled",
+    (b) =>
+      b.id !== excludeBookingId &&
+      b.status !== "cancelled" &&
+      b.status !== "completed" &&
+      b.deleted !== true,
   );
 
   const blockStart = addMinutes(start, -prepMinutes);

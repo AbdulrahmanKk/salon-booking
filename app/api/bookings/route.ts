@@ -88,10 +88,12 @@ async function handlePOST(request: NextRequest) {
   }
 }
 
-async function handleGET() {
-  const bookings = asArray<BookingWithServices>(getAllBookings());
+async function handleGET(request: NextRequest) {
+  const scopeParam = request.nextUrl.searchParams.get("scope");
+  const scope: "active" | "completed" = scopeParam === "completed" ? "completed" : "active";
+  const bookings = asArray<BookingWithServices>(getAllBookings(scope));
   const catalog = getAllServicesAdmin();
   const hairCount = bookings.filter((b) => bookingServiceCategories(b, catalog).includes("hair")).length;
-  console.log("[bookings/GET] total:", bookings.length, "| hair:", hairCount);
+  console.log("[bookings/GET] scope:", scope, "| total:", bookings.length, "| hair:", hairCount);
   return NextResponse.json(bookings);
 }
