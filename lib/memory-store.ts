@@ -3,7 +3,7 @@
  */
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
-import { BlobNotFoundError, del, get, put } from "@vercel/blob";
+import { BlobNotFoundError, del, get, list, put } from "@vercel/blob";
 import { join } from "path";
 import { randomUUID } from "crypto";
 import { asArray } from "./arrays";
@@ -258,6 +258,32 @@ function saveToFile(data: StoreData): void {
   }
 }
 
+function formatBlobError(e: unknown): string {
+  if (e instanceof Error) {
+    const extra = e as Error & { status?: number; statusCode?: number; body?: unknown };
+    const parts = [
+      e.message,
+      extra.status != null ? `status=${extra.status}` : "",
+      extra.statusCode != null ? `statusCode=${extra.statusCode}` : "",
+      extra.body != null ? `body=${JSON.stringify(extra.body)}` : "",
+      e.stack,
+    ].filter(Boolean);
+    return parts.join(" | ");
+  }
+  return String(e);
+}
+
+async function resolveBlobUrl(pathname: string): Promise<string | null> {
+  try {
+    const { blobs } = await list({ prefix: pathname, limit: 10 });
+    const exact = blobs.find((b) => b.pathname === pathname);
+    return exact?.url ?? blobs[0]?.url ?? null;
+  } catch (e) {
+    console.warn("[blob-store] list for delete failed | path:", pathname, "|", formatBlobError(e));
+    return null;
+  }
+}
+
 async function readFromBlob(): Promise<StoreData | null> {
   console.log("[blob-store] READ store START | path:", BLOB_STORE_PATH);
   try {
@@ -343,20 +369,60 @@ async function readBookingFromBlob(id: string): Promise<BookingWithServices | nu
 async function deleteBookingBlob(id: string): Promise<void> {
   if (!shouldUseBlob()) return;
   const path = bookingBlobPath(id);
-  try {
-    await del(path);
-    console.log("[blob-store] DELETE booking OK | id:", id, "| path:", path);
-  } catch (e) {
-    if (e instanceof BlobNotFoundError) {
-      console.log("[blob-store] DELETE booking NOT_FOUND | id:", id);
+  const targets = [path];
+  const url = await resolveBlobUrl(path);
+  if (url && !targets.includes(url)) targets.push(url);
+
+  for (const target of targets) {
+    try {
+      await del(target);
+      console.log("[blob-store] DELETE booking OK | id:", id, "| target:", target);
       return;
+    } catch (e) {
+      if (e instanceof BlobNotFoundError) {
+        console.log("[blob-store] DELETE booking NOT_FOUND | id:", id, "| target:", target);
+        return;
+      }
+      console.warn(
+        "[blob-store] DELETE booking attempt failed | id:",
+        id,
+        "| target:",
+        target,
+        "|",
+        formatBlobError(e),
+      );
     }
-    console.error("[blob-store] DELETE booking ERROR | id:", id, e);
-    throw e;
   }
+  console.warn("[blob-store] DELETE booking skipped (non-fatal) | id:", id, "| path:", path);
 }
 
-async function writeToBlob(data: StoreData): Promise<void> {
+async function verifyBookingRemovedFromBlob(id: string, maxAttempts = 10): Promise<boolean> {
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    if (attempt > 0) {
+      await new Promise((r) => setTimeout(r, 250 * attempt));
+    }
+    const readBack = await readFromBlob();
+    const stillInStore = readBack?.bookings.some((b) => b.id === id) ?? false;
+    const stillInIndex = asArray(readBack?.bookingIndex).includes(id);
+    if (!stillInStore && !stillInIndex) {
+      console.log("[deleteBooking] VERIFY OK | id:", id, "| attempt:", attempt + 1);
+      return true;
+    }
+    console.log(
+      "[deleteBooking] VERIFY retry | id:",
+      id,
+      "| attempt:",
+      attempt + 1,
+      "| stillInStore:",
+      stillInStore,
+      "| stillInIndex:",
+      stillInIndex,
+    );
+  }
+  return false;
+}
+
+async function writeToBlob(data: StoreData, options?: { skipBookingFiles?: boolean }): Promise<void> {
   const hasToken = Boolean(process.env.BLOB_READ_WRITE_TOKEN?.trim());
 
   // الذاكرة الحالية مصدر الحقيقة — لا نعيد استيراد حجوزات حُذفت من القائمة
@@ -391,8 +457,10 @@ async function writeToBlob(data: StoreData): Promise<void> {
     data.bookings.length,
   );
 
-  for (const booking of data.bookings) {
-    await writeBookingBlob(booking);
+  if (!options?.skipBookingFiles) {
+    for (const booking of data.bookings) {
+      await writeBookingBlob(booking);
+    }
   }
 }
 
@@ -1253,43 +1321,48 @@ export async function deleteBooking(id: string): Promise<boolean> {
   if (idx === -1) return false;
 
   const beforeCount = s.bookings.length;
-  s.bookings.splice(idx, 1);
-  s.bookingIndex = s.bookings.map((b) => b.id);
 
-  console.log(
-    "[deleteBooking] START | id:",
-    key,
-    "| bookings:",
-    beforeCount,
-    "→",
-    s.bookings.length,
-  );
+  console.log("[deleteBooking] START | id:", key, "| bookings before:", beforeCount);
 
   if (shouldUseBlob()) {
-    await deleteBookingBlob(key);
-    await writeToBlob(s);
-    dirty = false;
+    try {
+      const fresh = await readFromBlob();
+      if (fresh) {
+        fresh.bookings = fresh.bookings.filter((b) => b.id !== key);
+        fresh.bookingIndex = fresh.bookings.map((b) => b.id);
+        s.bookings = fresh.bookings;
+        s.bookingIndex = fresh.bookingIndex;
+        await writeToBlob(fresh, { skipBookingFiles: true });
+      } else {
+        s.bookings = s.bookings.filter((b) => b.id !== key);
+        s.bookingIndex = s.bookings.map((b) => b.id);
+        await writeToBlob(s, { skipBookingFiles: true });
+      }
+      dirty = false;
 
-    const readBack = await readFromBlob();
-    const stillInStore = readBack?.bookings.some((b) => b.id === key) ?? false;
-    const stillInIndex = asArray(readBack?.bookingIndex).includes(key);
-    console.log(
-      "[deleteBooking] VERIFY blob | id:",
-      key,
-      "| path:",
-      BLOB_STORE_PATH,
-      "| stillInStore:",
-      stillInStore,
-      "| stillInIndex:",
-      stillInIndex,
-      "| storeBookings:",
-      readBack?.bookings.length ?? 0,
-    );
-    if (stillInStore || stillInIndex) {
-      throw new Error("فشل حذف الحجز من ملف التخزين السحابي");
+      console.log(
+        "[deleteBooking] WRITE store | id:",
+        key,
+        "| bookings:",
+        beforeCount,
+        "→",
+        s.bookings.length,
+      );
+
+      await deleteBookingBlob(key);
+
+      const verified = await verifyBookingRemovedFromBlob(key);
+      if (!verified) {
+        throw new Error("فشل حذف الحجز من ملف التخزين السحابي");
+      }
+      console.log("[deleteBooking] OK blob | id:", key);
+    } catch (e) {
+      console.error("[deleteBooking] ERROR | id:", key, "|", formatBlobError(e));
+      throw e;
     }
-    console.log("[deleteBooking] OK blob | id:", key, "| deleted from store + booking file");
   } else {
+    s.bookings.splice(idx, 1);
+    s.bookingIndex = s.bookings.map((b) => b.id);
     saveToFile(s);
     dirty = false;
     console.log(

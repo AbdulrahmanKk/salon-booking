@@ -72,7 +72,11 @@ async function handleDELETE(
     }
     return NextResponse.json({ ok: true });
   } catch (e) {
-    const msg = e instanceof Error ? e.message : "خطأ";
+    console.error("[bookings/DELETE] ERROR | id:", params.id, "|", e);
+    const msg =
+      e instanceof Error
+        ? `${e.message}${e.stack ? `\n${e.stack}` : ""}`
+        : String(e);
     return NextResponse.json({ error: msg }, { status: 500 });
   }
 }
