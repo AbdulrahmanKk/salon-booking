@@ -327,6 +327,8 @@ export interface Booking {
   rating_id?: string | null;
   /** حذف منطقي — لا يظهر في الإدارة ولا يحجب المواعيد */
   deleted?: boolean;
+  /** إخفاء من لوحة الإدارة — يبقى محفوظاً ولا يحجب المواعيد */
+  hidden?: boolean;
 }
 
 export interface BookingWithServices extends Booking {
@@ -343,6 +345,7 @@ export interface BookingForSchedule {
   status: BookingStatus;
   services?: { service_id: string }[];
   deleted?: boolean;
+  hidden?: boolean;
 }
 
 export interface AvailableSlot {

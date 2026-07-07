@@ -168,6 +168,27 @@ export default function AdminPanel() {
     await load();
   };
 
+  const hideBookingRow = async (id: string) => {
+    if (!window.confirm("إخفاء هذا الحجز من الجدول؟")) return;
+    try {
+      const res = await fetch(`/api/bookings/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ hidden: true }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error ?? "فشل الإخفاء");
+        return;
+      }
+      setBookings((prev) => prev.filter((b) => b.id !== id));
+      setCalendarBookings((prev) => prev.filter((b) => b.id !== id));
+    } catch (e) {
+      const detail = e instanceof Error ? e.message : String(e);
+      setError(detail);
+    }
+  };
+
   const saveManual = async () => {
     if (!mName || !mPhone || !mLocation || !mSelectedSlot || !mSelections.length) {
       setError("أكملي بيانات الحجز اليدوي");
@@ -381,7 +402,7 @@ export default function AdminPanel() {
                 <th className="p-3">إدارة</th>
                 <th className="p-3">ثيرابست</th>
                 <th className="p-3">الحالة</th>
-                <th className="p-3">حذف</th>
+                <th className="p-3">إجراءات</th>
               </tr>
             </thead>
             <tbody>
@@ -447,13 +468,22 @@ export default function AdminPanel() {
                       </select>
                     </td>
                     <td className="p-3">
-                      <button
-                        type="button"
-                        className="rounded-lg border border-red-200 px-2 py-1 text-xs text-red-700 hover:bg-red-50"
-                        onClick={() => removeBooking(b.id)}
-                      >
-                        حذف
-                      </button>
+                      <div className="flex flex-wrap gap-1">
+                        <button
+                          type="button"
+                          className="rounded-lg border border-salon-blush px-2 py-1 text-xs hover:bg-salon-cream"
+                          onClick={() => hideBookingRow(b.id)}
+                        >
+                          إخفاء
+                        </button>
+                        <button
+                          type="button"
+                          className="rounded-lg border border-red-200 px-2 py-1 text-xs text-red-700 hover:bg-red-50"
+                          onClick={() => removeBooking(b.id)}
+                        >
+                          حذف
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))

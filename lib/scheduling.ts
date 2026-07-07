@@ -35,7 +35,8 @@ export function sortActiveBookings(
       (b) =>
         b.status !== "cancelled" &&
         b.status !== "completed" &&
-        b.deleted !== true,
+        b.deleted !== true &&
+        b.hidden !== true,
     )
     .sort((a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime());
 }
@@ -96,7 +97,8 @@ export function isSlotValidForTherapist(
       b.id !== excludeBookingId &&
       b.status !== "cancelled" &&
       b.status !== "completed" &&
-      b.deleted !== true,
+      b.deleted !== true &&
+      b.hidden !== true,
   );
 
   const blockStart = addMinutes(start, -prepMinutes);

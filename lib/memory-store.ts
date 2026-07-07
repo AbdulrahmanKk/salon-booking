@@ -667,7 +667,7 @@ function emitBookingNotifications(
 function ensureReminderNotifications(): void {
   const before = store().notifications.length;
   for (const booking of store().bookings) {
-    if (!isBookingDeleted(booking) && isUpcomingForReminder(booking)) {
+    if (!isBookingDeleted(booking) && !isBookingHidden(booking) && isUpcomingForReminder(booking)) {
       emitBookingNotifications("reminder", booking);
     }
   }
@@ -890,7 +890,7 @@ export function getCustomerPackages(phone: string): CustomerPackage[] {
 export function getCustomerAccount(phone: string): CustomerAccount {
   const key = normalizePhone(phone);
   const bookings = store().bookings
-    .filter((b) => phonesMatch(b.customer_phone, key) && !isBookingDeleted(b) && b.status !== "completed")
+    .filter((b) => phonesMatch(b.customer_phone, key) && isBookingVisibleInAdmin(b) && b.status !== "completed")
     .sort((a, b) => new Date(b.start_time).getTime() - new Date(a.start_time).getTime());
   const transactions = store()
     .walletTransactions.filter((t) => phonesMatch(t.phone, key))
@@ -994,13 +994,21 @@ function isBookingDeleted(b: { deleted?: boolean }): boolean {
   return b.deleted === true;
 }
 
+function isBookingHidden(b: { hidden?: boolean }): boolean {
+  return b.hidden === true;
+}
+
+function isBookingVisibleInAdmin(b: { deleted?: boolean; hidden?: boolean }): boolean {
+  return !isBookingDeleted(b) && !isBookingHidden(b);
+}
+
 export type BookingsListScope = "active" | "completed";
 
 function filterBookingsByScope(
   bookings: BookingWithServices[],
   scope: BookingsListScope,
 ): BookingWithServices[] {
-  const visible = bookings.filter((b) => !isBookingDeleted(b));
+  const visible = bookings.filter((b) => isBookingVisibleInAdmin(b));
   if (scope === "completed") {
     return visible.filter((b) => b.status === "completed");
   }
@@ -1019,6 +1027,7 @@ export function getBookingsForSchedule(): BookingForSchedule[] {
     status: b.status,
     services: b.services,
     deleted: b.deleted,
+    hidden: b.hidden,
   }));
 }
 
@@ -1310,6 +1319,21 @@ export function updateBookingStatus(id: string, status: BookingStatus): Booking 
     }
   }
 
+  persist();
+  return b;
+}
+
+/** إخفاء حجز من لوحة الإدارة — hidden=true ثم persist (نفس آلية الحفظ الناجحة) */
+export function hideBooking(id: string): BookingWithServices | null {
+  const key = id?.trim();
+  if (!key) return null;
+
+  const b = store().bookings.find((x) => x.id === key);
+  if (!b) return null;
+  if (isBookingHidden(b)) return b;
+
+  b.hidden = true;
+  console.log("[hideBooking] hidden=true | id:", key);
   persist();
   return b;
 }

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
   deleteBooking,
+  hideBooking,
   rescheduleBooking,
   transferTherapist,
   updateBookingStatus,
@@ -47,8 +48,14 @@ async function handlePATCH(
       return NextResponse.json(data);
     }
 
-    const { status } = body as { status: BookingStatus };
-    if (!VALID_STATUSES.includes(status)) {
+    if (body.hidden === true) {
+      const data = hideBooking(id);
+      if (!data) return NextResponse.json({ error: "الحجز غير موجود" }, { status: 404 });
+      return NextResponse.json(data);
+    }
+
+    const { status } = body as { status?: BookingStatus };
+    if (!status || !VALID_STATUSES.includes(status)) {
       return NextResponse.json({ error: "حالة غير صالحة" }, { status: 400 });
     }
 
@@ -56,8 +63,12 @@ async function handlePATCH(
     if (!data) return NextResponse.json({ error: "الحجز غير موجود" }, { status: 404 });
     return NextResponse.json(data);
   } catch (e) {
-    const msg = e instanceof Error ? e.message : "خطأ";
-    return NextResponse.json({ error: msg }, { status: 400 });
+    const detail =
+      e instanceof Error
+        ? `${e.message}${e.stack ? `\n${e.stack}` : ""}`
+        : JSON.stringify(e, Object.getOwnPropertyNames(e as object));
+    console.error("[bookings/PATCH] ERROR | id:", params.id, "| detail:", detail);
+    return NextResponse.json({ error: detail }, { status: 400 });
   }
 }
 
