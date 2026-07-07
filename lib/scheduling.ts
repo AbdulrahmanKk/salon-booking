@@ -31,7 +31,7 @@ export function sortActiveBookings(
   bookings: BookingForSchedule[] | null | undefined,
 ): BookingForSchedule[] {
   return asArray<BookingForSchedule>(bookings)
-    .filter((b) => b.status !== "cancelled")
+    .filter((b) => b.status !== "cancelled" && b.deleted !== true)
     .sort((a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime());
 }
 

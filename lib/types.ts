@@ -325,6 +325,8 @@ export interface Booking {
   visit_status?: VisitStatus;
   visit_timeline?: VisitTimeline;
   rating_id?: string | null;
+  /** حذف منطقي — لا يظهر في الإدارة ولا يحجب المواعيد */
+  deleted?: boolean;
 }
 
 export interface BookingWithServices extends Booking {
@@ -340,6 +342,7 @@ export interface BookingForSchedule {
   end_time: string;
   status: BookingStatus;
   services?: { service_id: string }[];
+  deleted?: boolean;
 }
 
 export interface AvailableSlot {

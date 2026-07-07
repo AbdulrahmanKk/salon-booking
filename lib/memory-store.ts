@@ -402,34 +402,6 @@ async function readBookingFromBlob(id: string): Promise<BookingWithServices | nu
   }
 }
 
-async function verifyBookingRemovedFromBlob(id: string, maxAttempts = 12): Promise<boolean> {
-  for (let attempt = 0; attempt < maxAttempts; attempt++) {
-    if (attempt > 0) {
-      await new Promise((r) => setTimeout(r, 300 * attempt));
-    }
-    const readBack = (await readStoreViaList()) ?? (await readFromBlob());
-    const stillInStore = readBack?.bookings.some((b) => b.id === id) ?? false;
-    const stillInIndex = asArray(readBack?.bookingIndex).includes(id);
-    if (!stillInStore && !stillInIndex) {
-      console.log("[deleteBooking] VERIFY OK | id:", id, "| attempt:", attempt + 1);
-      return true;
-    }
-    console.log(
-      "[deleteBooking] VERIFY retry | id:",
-      id,
-      "| attempt:",
-      attempt + 1,
-      "| stillInStore:",
-      stillInStore,
-      "| stillInIndex:",
-      stillInIndex,
-      "| bookings:",
-      readBack?.bookings.length ?? 0,
-    );
-  }
-  return false;
-}
-
 async function writeToBlob(data: StoreData, options?: { skipBookingFiles?: boolean }): Promise<{ pathname: string }> {
   const hasToken = Boolean(process.env.BLOB_READ_WRITE_TOKEN?.trim());
 
@@ -695,7 +667,7 @@ function emitBookingNotifications(
 function ensureReminderNotifications(): void {
   const before = store().notifications.length;
   for (const booking of store().bookings) {
-    if (isUpcomingForReminder(booking)) {
+    if (!isBookingDeleted(booking) && isUpcomingForReminder(booking)) {
       emitBookingNotifications("reminder", booking);
     }
   }
@@ -918,7 +890,7 @@ export function getCustomerPackages(phone: string): CustomerPackage[] {
 export function getCustomerAccount(phone: string): CustomerAccount {
   const key = normalizePhone(phone);
   const bookings = store().bookings
-    .filter((b) => phonesMatch(b.customer_phone, key))
+    .filter((b) => phonesMatch(b.customer_phone, key) && !isBookingDeleted(b))
     .sort((a, b) => new Date(b.start_time).getTime() - new Date(a.start_time).getTime());
   const transactions = store()
     .walletTransactions.filter((t) => phonesMatch(t.phone, key))
@@ -1018,9 +990,15 @@ export function createBalanceGiftCard(input: {
 
 // ─── الحجوزات ───
 
+function isBookingDeleted(b: { deleted?: boolean }): boolean {
+  return b.deleted === true;
+}
+
 export function getBookingsForSchedule(): BookingForSchedule[] {
   const catalog = store().services;
-  return store().bookings.map((b) => ({
+  return store()
+    .bookings.filter((b) => !isBookingDeleted(b))
+    .map((b) => ({
     id: b.id,
     therapist_id: b.therapist_id,
     schedule_group: b.schedule_group,
@@ -1029,12 +1007,15 @@ export function getBookingsForSchedule(): BookingForSchedule[] {
     end_time: b.end_time,
     status: b.status,
     services: b.services,
+    deleted: b.deleted,
   }));
 }
 
 export function getAllBookings(): BookingWithServices[] {
   const catalog = store().services;
-  const sorted = [...store().bookings].sort(
+  const sorted = store()
+    .bookings.filter((b) => !isBookingDeleted(b))
+    .sort(
     (a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime(),
   );
   for (const b of sorted) {
@@ -1047,7 +1028,7 @@ export function getAllBookings(): BookingWithServices[] {
 }
 
 export function getBookingsByPhone(phone: string): BookingWithServices[] {
-  return store().bookings.filter((b) => phonesMatch(b.customer_phone, phone));
+  return store().bookings.filter((b) => phonesMatch(b.customer_phone, phone) && !isBookingDeleted(b));
 }
 
 export function createBooking(input: {
@@ -1321,73 +1302,41 @@ export function updateBookingStatus(id: string, status: BookingStatus): Booking 
   return b;
 }
 
-/** حذف حجز نهائياً من الذاكرة وVercel Blob */
+/** حذف منطقي — يُعلَّم الحجز deleted=true ويُحفظ عبر put */
 export async function deleteBooking(id: string): Promise<boolean> {
   const key = id?.trim();
   if (!key) return false;
 
   const s = store();
-  const idx = s.bookings.findIndex((b) => b.id === key);
-  if (idx === -1) return false;
+  const booking = s.bookings.find((b) => b.id === key);
+  if (!booking) return false;
+  if (isBookingDeleted(booking)) return true;
 
-  const beforeCount = s.bookings.length;
+  booking.deleted = true;
+  console.log("[deleteBooking] soft delete | id:", key);
 
-  console.log("[deleteBooking] START | id:", key, "| bookings before:", beforeCount);
+  persist();
 
   if (shouldUseBlob()) {
     try {
-      const fresh = (await readStoreViaList()) ?? (await readFromBlob());
-      if (!fresh) {
-        throw new Error("تعذر قراءة ملف التخزين السحابي عبر list+fetch");
-      }
-
-      if (!fresh.bookings.some((b) => b.id === key) && !s.bookings.some((b) => b.id === key)) {
-        return false;
-      }
-
-      fresh.bookings = fresh.bookings.filter((b) => b.id !== key);
-      fresh.bookingIndex = fresh.bookings.map((b) => b.id);
-
-      s.bookings = fresh.bookings;
-      s.bookingIndex = fresh.bookingIndex;
-
-      const putResult = await writeToBlob(fresh, { skipBookingFiles: true });
+      const putResult = await writeToBlob(s, { skipBookingFiles: true });
       dirty = false;
-
       console.log(
-        "[deleteBooking] WRITE store OK | id:",
+        "[deleteBooking] OK blob | id:",
         key,
         "| pathname:",
         putResult.pathname,
-        "| bookings:",
-        beforeCount,
-        "→",
-        fresh.bookings.length,
+        "| deleted=true",
       );
-
-      const verified = await verifyBookingRemovedFromBlob(key);
-      if (!verified) {
-        const lastRead = (await readStoreViaList()) ?? (await readFromBlob());
-        throw new Error(
-          `فشل حذف الحجز من ملف التخزين السحابي | putPath=${putResult.pathname} | stillInStore=${lastRead?.bookings.some((b) => b.id === key) ?? "?"} | bookings=${lastRead?.bookings.length ?? "?"}`,
-        );
-      }
-      console.log("[deleteBooking] OK blob | id:", key);
     } catch (e) {
+      booking.deleted = false;
       console.error("[deleteBooking] ERROR | id:", key, "|", formatBlobError(e));
       throw e;
     }
   } else {
-    s.bookings.splice(idx, 1);
-    s.bookingIndex = s.bookings.map((b) => b.id);
     saveToFile(s);
     dirty = false;
-    console.log(
-      "[deleteBooking] OK file | id:",
-      key,
-      "| remaining:",
-      s.bookings.length,
-    );
+    console.log("[deleteBooking] OK file | id:", key, "| deleted=true");
   }
 
   return true;
@@ -1535,11 +1484,18 @@ export function getRatingForBooking(bookingId: string): BookingRating | null {
 }
 
 export function getReportsSummary(): ReportsSummary {
-  return buildReports(store().bookings, store().ratings, store().therapists);
+  return buildReports(
+    store().bookings.filter((b) => !isBookingDeleted(b)),
+    store().ratings,
+    store().therapists,
+  );
 }
 
 export function getTherapistTodayBookings(therapistId: number): BookingWithServices[] {
-  return getBookingsForTherapistToday(store().bookings, therapistId);
+  return getBookingsForTherapistToday(
+    store().bookings.filter((b) => !isBookingDeleted(b)),
+    therapistId,
+  );
 }
 
 // ─── الإشعارات ───
